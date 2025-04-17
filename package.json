@@ -1,0 +1,24 @@
+{
+  "name": "backend_notes_moviles",
+  "version": "1.0.0",
+  "description": "API for managing notes and clients",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "mongoose": "^7.0.0",
+    "cors": "^2.8.5",
+    "morgan": "^1.10.0",
+    "express-session": "^1.17.3",
+    "nodemailer": "^6.9.1"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  },
+  "author": "",
+  "license": "ISC"
+}
