@@ -1,0 +1,51 @@
+const Client = require("../models/client.model"); // Asegúrate de tener un modelo para los clientes
+
+const register = async (req, res) => {
+  try {
+    const { id, nombre, latitude, longitude, start, end } = req.body;
+
+    // Verificar que los campos requeridos estén presentes
+    if (!id || !nombre || !latitude || !longitude || !start || !end) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // Validar formato de hora (HH:mm:ss)
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
+    if (!timeRegex.test(start) || !timeRegex.test(end)) {
+      return res.status(400).json({ message: 'Invalid time format. Use HH:mm:ss' });
+    }
+
+    // Verificar si el cliente ya existe en la base de datos
+    const existingClient = await Client.findOne({ id });
+    if (existingClient) {
+      return res.status(400).json({ message: 'Client with this ID already exists' });
+    }
+
+    // Crear un nuevo cliente
+    const newClient = new Client({
+      id,
+      nombre,
+      location: {
+        latitude,
+        longitude,
+      },
+      schedule: {
+        start,
+        end,
+      },
+    });
+
+    // Guardar el cliente en la base de datos
+    await newClient.save();
+
+    res.status(201).json({ message: 'Client registered successfully' });
+  } catch (err) {
+    console.log("Error en el registro del cliente:", err);
+    res.status(500).json({ message: 'Error registering client' });
+  }
+};
+
+module.exports = {
+  register,
+  
+};
