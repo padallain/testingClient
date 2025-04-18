@@ -45,7 +45,36 @@ const register = async (req, res) => {
   }
 };
 
+const getClient = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Buscar el cliente en la base de datos por su ID
+    const client = await Client.findOne({ id });
+
+    if (!client) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    // Construir el enlace de Google Maps
+    const googleMapsLink = `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`;
+
+    // Responder con la información del cliente y el enlace de Google Maps
+    res.status(200).json({
+      id: client.id,
+      nombre: client.nombre,
+      location: client.location,
+      schedule: client.schedule,
+      googleMapsLink,
+    });
+  } catch (err) {
+    console.log("Error al obtener el cliente:", err);
+    res.status(500).json({ message: 'Error fetching client' });
+  }
+};
+
 module.exports = {
   register,
+  getClient,
   
 };
