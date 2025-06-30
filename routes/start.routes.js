@@ -1,6 +1,7 @@
 const express = require('express');
-const { register, getClient } = require('../controllers/auth.controllers');
+const { register, login, authMiddleware } = require('../controllers/auth.controllers');
 const { makeRoute } = require('../controllers/routing.controllers'); // Asegúrate de tener la función makeRoute en tu controlador
+const { registerClient, getClient } = require('../controllers/client.controllers');
 const router = express.Router();
 
 router.use(express.json());
@@ -9,10 +10,16 @@ router.use(express.json());
 router.get('/', (req, res) => {
   res.send('You have to log in.');
 });
-router.post('/saveClient', register);
-router.post('/makeRoute', makeRoute);
 
-// Nueva ruta para obtener un cliente por ID
+// Auth routes
+router.post('/register', register);
+router.post('/login', login);
+
+// Rutas de clientes
+router.post('/registerClient', registerClient);
 router.get('/getClient/:id', getClient);
+
+// Rutas de logística
+router.post('/makeRoute', makeRoute);
 
 module.exports = router;
