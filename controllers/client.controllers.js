@@ -4,9 +4,9 @@ const bcrypt = require("bcryptjs");
 // REGISTRO DE USUARIO (CLIENTE)
 const registerClient = async (req, res) => {
   try {
-    const { id, nombre, latitude, longitude, start, end } = req.body;
+    const { id, nombre, password, latitude, longitude, start, end } = req.body;
 
-    if (!id || !nombre  || !latitude || !longitude || !start || !end) {
+    if (!id || !nombre || !password || !latitude || !longitude || !start || !end) {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
