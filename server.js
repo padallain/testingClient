@@ -8,7 +8,9 @@ const startRoutes = require("./routes/start.routes");
 const app = express();
 
 // Aplica el middleware cors a todas las rutas
-app.use(cors());
+app.use(cors({
+  origin: '*',
+}));
 
 app.use(morgan("dev"));
 
