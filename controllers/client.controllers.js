@@ -36,6 +36,17 @@ const registerClient = async (req, res) => {
   }
 };
 
+
+const countClients = async (req, res) => {
+  try {
+    const count = await Client.countDocuments();
+    res.status(200).json({ count });
+  } catch (err) {
+    console.log("Error al contar los clientes:", err);
+    res.status(500).json({ message: 'Error counting clients' });
+  }
+};
+
 const getClient = async (req, res) => {
   try {
     const { id } = req.params;
@@ -66,5 +77,6 @@ const getClient = async (req, res) => {
 
 module.exports = {
   registerClient,
+  countClients,
   getClient,
 };
