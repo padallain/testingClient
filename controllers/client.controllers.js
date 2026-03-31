@@ -1,18 +1,12 @@
 const Client = require("../models/client.model");
-const bcrypt = require("bcryptjs");
 
 // REGISTRO DE USUARIO (CLIENTE)
 const registerClient = async (req, res) => {
   try {
-    const { id, nombre, latitude, longitude, start, end } = req.body;
+    const { id, nombre, latitude, longitude, start, end, createdBy } = req.body;
 
-    if (!id || !nombre || !latitude || !longitude || !start || !end) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
-
-    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/;
-    if (!timeRegex.test(start) || !timeRegex.test(end)) {
-      return res.status(400).json({ message: 'Invalid time format. Use HH:mm:ss' });
+    if (!id || !nombre || !latitude || !longitude || !start || !end || !createdBy) {
+      return res.status(400).json({ message: 'All fields are required, including createdBy' });
     }
 
     const existingClient = await Client.findOne({ id });
@@ -25,6 +19,7 @@ const registerClient = async (req, res) => {
       nombre,
       location: { latitude, longitude },
       schedule: { start, end },
+      createdBy, 
     });
 
     await newClient.save();
@@ -36,14 +31,13 @@ const registerClient = async (req, res) => {
   }
 };
 
-
 const countClients = async (req, res) => {
   try {
     const count = await Client.countDocuments();
     res.status(200).json({ count });
   } catch (err) {
-    console.log("Error al contar los clientes:", err);
-    res.status(500).json({ message: 'Error counting clients' });
+    console.log("Error contando clientes:", err);
+    res.status(500).json({ message: "Error counting clients" });
   }
 };
 
@@ -51,27 +45,16 @@ const getClient = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Buscar el cliente en la base de datos por su ID
     const client = await Client.findOne({ id });
 
     if (!client) {
-      return res.status(404).json({ message: 'Client not found' });
+      return res.status(404).json({ message: "Client not found" });
     }
 
-    // Construir el enlace de Google Maps
-    const googleMapsLink = `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`;
-
-    // Responder con la información del cliente y el enlace de Google Maps
-    res.status(200).json({
-      id: client.id,
-      nombre: client.nombre,
-      location: client.location,
-      schedule: client.schedule,
-      googleMapsLink,
-    });
+    res.status(200).json(client);
   } catch (err) {
-    console.log("Error al obtener el cliente:", err);
-    res.status(500).json({ message: 'Error fetching client' });
+    console.log("Error obteniendo cliente:", err);
+    res.status(500).json({ message: "Error getting client" });
   }
 };
 
