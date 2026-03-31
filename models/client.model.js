@@ -11,7 +11,6 @@ const clientSchema = new mongoose.Schema({
     start: { type: String, required: true },
     end: { type: String, required: true },
   },
-  createdBy: { type: Number, required: true },
 });
 
 module.exports = mongoose.model('Client', clientSchema);

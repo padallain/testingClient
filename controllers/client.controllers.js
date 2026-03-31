@@ -3,10 +3,10 @@ const Client = require("../models/client.model");
 // REGISTRO DE USUARIO (CLIENTE)
 const registerClient = async (req, res) => {
   try {
-    const { id, nombre, latitude, longitude, start, end, createdBy } = req.body;
+    const { id, nombre, latitude, longitude, start, end } = req.body;
 
-    if (!id || !nombre || !latitude || !longitude || !start || !end || !createdBy) {
-      return res.status(400).json({ message: 'All fields are required, including createdBy' });
+    if (!id || !nombre || !latitude || !longitude || !start || !end) {
+      return res.status(400).json({ message: 'All fields are required' });
     }
 
     const existingClient = await Client.findOne({ id });
@@ -19,7 +19,6 @@ const registerClient = async (req, res) => {
       nombre,
       location: { latitude, longitude },
       schedule: { start, end },
-      createdBy, 
     });
 
     await newClient.save();
