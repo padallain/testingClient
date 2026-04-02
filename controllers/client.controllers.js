@@ -127,10 +127,24 @@ const createClientLocationReport = async (req, res) => {
   }
 };
 
+const listClientLocationReports = async (_req, res) => {
+  try {
+    const reports = await ClientLocationReport.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({ reports });
+  } catch (err) {
+    console.log("Error obteniendo denuncias de clientes:", err);
+    res.status(500).json({ message: "Error getting client location reports" });
+  }
+};
+
 module.exports = {
   registerClient,
   countClients,
   getClient,
   deleteClient,
   createClientLocationReport,
+  listClientLocationReports,
 };

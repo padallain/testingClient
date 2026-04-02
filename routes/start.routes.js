@@ -1,7 +1,7 @@
 const express = require('express');
 const { register, login, authMiddleware } = require('../controllers/auth.controllers');
 const { makeRoute } = require('../controllers/routing.controllers'); // Asegúrate de tener la función makeRoute en tu controlador
-const { registerClient, countClients, getClient, deleteClient, createClientLocationReport } = require('../controllers/client.controllers');
+const { registerClient, countClients, getClient, deleteClient, createClientLocationReport, listClientLocationReports } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks } = require('../controllers/dailyCheck.controllers');
 const router = express.Router();
 
@@ -36,6 +36,7 @@ router.post('/registerClient', registerClient);
 router.get('/countClients', countClients);
 router.get('/getClient/:id', getClient);
 router.post('/clientLocationReports', createClientLocationReport);
+router.get('/internal/admin/clientLocationReports', requireAdminDeleteKey, listClientLocationReports);
 router.delete('/internal/admin/deleteClient/:id', requireAdminDeleteKey, deleteClient);
 
 // Rutas de logística
