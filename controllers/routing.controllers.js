@@ -1,4 +1,5 @@
-const Client = require("../models/client.model"); // Asegúrate de tener un modelo para los clientes
+const Client = require("../models/client.model");
+const RouteAssignment = require("../models/routeAssignment.model");
 
 const ORIGIN = { latitude: 10.578208693113535, longitude: -71.67338068775426 };
 const START_ID = "317554345";
@@ -18,29 +19,137 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-const MAX_WAYPOINTS = 10; // Google Maps permite hasta 10 puntos por link (incluyendo origen y destino)
+const MAX_WAYPOINTS = 10;
 
-// ...existing code...
+const normalizeWeight = (value) => {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return 0;
+  }
+
+  return numericValue;
+};
+
+const buildRouteLabel = (driverId, requestedLabel) => {
+  const normalizedLabel = typeof requestedLabel === "string" ? requestedLabel.trim() : "";
+
+  if (normalizedLabel) {
+    return normalizedLabel;
+  }
+
+  const dateTag = new Date().toISOString().slice(0, 10);
+  return `Ruta ${driverId} ${dateTag}`;
+};
+
+const buildRouteArtifacts = (route) => {
+  const response = route.map((client) => ({
+    id: client.id,
+    nombre: client.nombre,
+    weight: client.weight,
+    location: client.location,
+    googleMapsLink: `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`,
+  }));
+
+  const googleMapsRouteLinks = [];
+  let startPoint = `${ORIGIN.latitude},${ORIGIN.longitude}`;
+
+  for (let i = 0; i < route.length; i += MAX_WAYPOINTS - 1) {
+    const segment = route.slice(i, i + (MAX_WAYPOINTS - 1));
+    const waypoints = [
+      startPoint,
+      ...segment.map(
+        (client) => `${client.location.latitude},${client.location.longitude}`,
+      ),
+    ].join("/");
+    googleMapsRouteLinks.push(`https://www.google.com/maps/dir/${waypoints}`);
+
+    const lastClient = segment[segment.length - 1];
+    if (lastClient) {
+      startPoint = `${lastClient.location.latitude},${lastClient.location.longitude}`;
+    }
+  }
+
+  const coordinates = [
+    [ORIGIN.longitude, ORIGIN.latitude],
+    ...route.map((client) => [client.location.longitude, client.location.latitude]),
+  ];
+  const aParam = coordinates.map(([lng, lat]) => `${lat},${lng}`).join(",");
+  const first = coordinates[0];
+  const openRouteLink = `https://maps.openrouteservice.org/directions?n1=${first[1]}&n2=${first[0]}&a=${aParam}&b=0&c=0&k1=en-US&k2=km`;
+
+  return {
+    response,
+    googleMapsRouteLinks,
+    openRouteLink,
+  };
+};
+
+const calculateRouteStatus = (assignment) => {
+  const allStopsDispatched = assignment.stops.every((stop) => stop.dispatched);
+  const allMissingResolved = assignment.missingClients.every((item) => item.resolved);
+
+  return allStopsDispatched && allMissingResolved ? "completed" : "active";
+};
 
 const makeRoute = async (req, res) => {
   try {
-    const { ids } = req.body;
+    const { ids, stops, driverId, driverName, routeLabel } = req.body;
+      const routeWeight = normalizeWeight(req.body?.routeWeight);
 
-    if (!Array.isArray(ids)) {
+    const normalizedStops = Array.isArray(stops)
+      ? stops
+      : Array.isArray(ids)
+        ? ids.map((id) => ({ clientId: id }))
+        : null;
+
+    if (!Array.isArray(normalizedStops)) {
       return res
         .status(400)
-        .json({ message: "Invalid input, expected an array of IDs" });
+        .json({ message: "Invalid input, expected an array of stops" });
     }
 
-    const clients = await Client.find({ id: { $in: ids } });
+    const aggregatedStops = new Map();
+    const duplicateClientIds = [];
 
-    // IDs encontrados y no encontrados
+    normalizedStops.forEach((rawStop) => {
+      const clientId = String(rawStop?.clientId ?? rawStop?.id ?? "").trim();
+
+      if (!clientId) {
+        return;
+      }
+      const existingStop = aggregatedStops.get(clientId);
+
+      if (existingStop) {
+        duplicateClientIds.push(clientId);
+        return;
+      }
+
+      aggregatedStops.set(clientId, {
+        clientId,
+      });
+    });
+
+    const uniqueStops = Array.from(aggregatedStops.values());
+
+    if (uniqueStops.length === 0) {
+      return res.status(400).json({ message: "At least one valid client ID is required" });
+    }
+
+    const uniqueIds = uniqueStops.map((stop) => stop.clientId);
+    const clients = await Client.find({ id: { $in: uniqueIds } }).lean();
+
     const foundIds = clients.map((client) => client.id);
-    const notFoundIds = ids.filter((id) => !foundIds.includes(id));
+    const notFoundIds = uniqueIds.filter((id) => !foundIds.includes(id));
+    const notFoundClients = notFoundIds.map((id) => ({
+      clientId: id,
+      resolved: false,
+      resolvedAt: null,
+    }));
 
     const clientsWithCoordinates = clients.filter(
       (client) =>
-        client.location && client.location.latitude && client.location.longitude
+        client.location && Number.isFinite(client.location.latitude) && Number.isFinite(client.location.longitude)
     );
 
     if (clientsWithCoordinates.length < 1) {
@@ -49,11 +158,11 @@ const makeRoute = async (req, res) => {
         .json({
           message: "At least one client with valid coordinates is required",
           notFoundIds,
+          notFoundClients,
         });
     }
 
-    // Buscar y separar el cliente de inicio
-    const startClientIndex = clientsWithCoordinates.findIndex(c => c.id === START_ID);
+    const startClientIndex = clientsWithCoordinates.findIndex((client) => client.id === START_ID);
     let startClient = null;
     let restClients = clientsWithCoordinates;
     if (startClientIndex !== -1) {
@@ -64,23 +173,20 @@ const makeRoute = async (req, res) => {
       ];
     }
 
-    // --- OPTIMIZACIÓN DE RUTA: NEAREST NEIGHBOR ---
     let route = [];
     let currentPoint;
     if (startClient) {
-      route.push(startClient);
-      currentPoint = startClient;
+      route.push({ ...startClient });
+      currentPoint = route[0];
     } else {
-      // Si no hay cliente de inicio, empieza desde el origen
       currentPoint = {
-        location: ORIGIN
+        location: ORIGIN,
       };
     }
 
     let unvisited = [...restClients];
 
     while (unvisited.length > 0) {
-      // Buscar el cliente más cercano al punto actual
       let nearestIdx = 0;
       let minDist = calculateDistance(
         currentPoint.location.latitude,
@@ -100,51 +206,55 @@ const makeRoute = async (req, res) => {
           nearestIdx = i;
         }
       }
-      // Agregar el más cercano a la ruta y actualizar el punto actual
-      currentPoint = unvisited[nearestIdx];
+      currentPoint = {
+        ...unvisited[nearestIdx],
+      };
       route.push(currentPoint);
       unvisited.splice(nearestIdx, 1);
     }
 
-    const response = route.map((client) => ({
-      id: client.id,
-      nombre: client.nombre,
-      location: client.location,
-      googleMapsLink: `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`,
-    }));
+    const { response, googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(route);
+    const totalWeight = routeWeight;
+    const uniqueClientCount = uniqueStops.length;
+    const normalizedDriverId = String(driverId || "").trim();
 
-    // Dividir la ruta en segmentos de máximo 10 puntos, siempre comenzando desde el ORIGIN o el primer cliente
-    const googleMapsRouteLinks = [];
-    let startPoint = `${ORIGIN.latitude},${ORIGIN.longitude}`;
-    for (let i = 0; i < route.length; i += MAX_WAYPOINTS - 1) {
-      const segment = route.slice(i, i + (MAX_WAYPOINTS - 1));
-      const waypoints = [
-        startPoint,
-        ...segment.map(
-          (client) => `${client.location.latitude},${client.location.longitude}`
-        ),
-      ].join("/");
-      googleMapsRouteLinks.push(`https://www.google.com/maps/dir/${waypoints}`);
+    let savedRoute = null;
 
-      // El próximo segmento debe empezar donde terminó este
-      const lastClient = segment[segment.length - 1];
-      if (lastClient) {
-        startPoint = `${lastClient.location.latitude},${lastClient.location.longitude}`;
-      }
+    if (normalizedDriverId) {
+      const assignment = new RouteAssignment({
+        driverId: normalizedDriverId,
+        driverName: typeof driverName === "string" ? driverName.trim() : "",
+        routeLabel: buildRouteLabel(normalizedDriverId, routeLabel),
+        uniqueClientCount,
+        totalWeight,
+        duplicateClientIds: [...new Set(duplicateClientIds)],
+        googleMapsRouteLinks,
+        openRouteLink,
+        status: notFoundClients.length === 0 && response.every((stop) => stop.dispatched)
+          ? "completed"
+          : "active",
+        stops: response.map((client, index) => ({
+          order: index + 1,
+          clientId: client.id,
+          nombre: client.nombre,
+          location: client.location,
+          googleMapsLink: client.googleMapsLink,
+          dispatched: false,
+          dispatchedAt: null,
+        })),
+        missingClients: notFoundClients,
+      });
+
+      await assignment.save();
+
+      savedRoute = {
+        routeId: assignment._id,
+        driverId: assignment.driverId,
+        driverName: assignment.driverName,
+        routeLabel: assignment.routeLabel,
+        status: assignment.status,
+      };
     }
-
-    // --- LINK DE OPENROUTESERVICE ---
-    // Construir el link para el visor de OpenRouteService
-    // Formato: ...&a=lat1,lng1,lat2,lng2,lat3,lng3...
-    const coordinates = [
-      [ORIGIN.longitude, ORIGIN.latitude], // ORIGEN
-      ...route.map(client => [client.location.longitude, client.location.latitude])
-    ];
-    const aParam = coordinates
-      .map(([lng, lat]) => `${lat},${lng}`)
-      .join(',');
-    const first = coordinates[0];
-    const openRouteLink = `https://maps.openrouteservice.org/directions?n1=${first[1]}&n2=${first[0]}&a=${aParam}&b=0&c=0&k1=en-US&k2=km`;
 
     res.status(200).json({
       route: response,
@@ -152,6 +262,11 @@ const makeRoute = async (req, res) => {
       googleMapsRouteLinks,
       openRouteLink,
       notFoundIds,
+      notFoundClients,
+      duplicateClientIds: [...new Set(duplicateClientIds)],
+      uniqueClientCount,
+      totalWeight,
+      savedRoute,
     });
   } catch (err) {
     console.log("Error al calcular la ruta logística:", err);
@@ -159,8 +274,101 @@ const makeRoute = async (req, res) => {
   }
 };
 
-// ...existing code...
+const getDriverCurrentRoute = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+
+    if (!driverId) {
+      return res.status(400).json({ message: "Driver ID is required" });
+    }
+
+    const normalizedDriverId = String(driverId).trim();
+    const routeAssignment = await RouteAssignment.findOne({ driverId: normalizedDriverId, status: "active" })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const latestRoute = routeAssignment || await RouteAssignment.findOne({ driverId: normalizedDriverId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!latestRoute) {
+      return res.status(404).json({ message: "No route found for this driver" });
+    }
+
+    res.status(200).json({ route: latestRoute });
+  } catch (err) {
+    console.log("Error obteniendo ruta del chofer:", err);
+    res.status(500).json({ message: "Error getting driver route" });
+  }
+};
+
+const updateStopDispatchStatus = async (req, res) => {
+  try {
+    const { routeId, clientId } = req.params;
+    const dispatched = Boolean(req.body?.dispatched);
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const stop = assignment.stops.find((item) => item.clientId === clientId);
+
+    if (!stop) {
+      return res.status(404).json({ message: "Stop not found in route" });
+    }
+
+    stop.dispatched = dispatched;
+    stop.dispatchedAt = dispatched ? new Date() : null;
+    assignment.status = calculateRouteStatus(assignment);
+    await assignment.save();
+
+    res.status(200).json({
+      message: "Stop updated successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error actualizando despacho del cliente:", err);
+    res.status(500).json({ message: "Error updating stop dispatch status" });
+  }
+};
+
+const updateMissingClientResolution = async (req, res) => {
+  try {
+    const { routeId, clientId } = req.params;
+    const resolved = Boolean(req.body?.resolved);
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const missingClient = assignment.missingClients.find((item) => item.clientId === clientId);
+
+    if (!missingClient) {
+      return res.status(404).json({ message: "Missing client not found in route" });
+    }
+
+    missingClient.resolved = resolved;
+    missingClient.resolvedAt = resolved ? new Date() : null;
+    assignment.status = calculateRouteStatus(assignment);
+    await assignment.save();
+
+    res.status(200).json({
+      message: "Missing client updated successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error actualizando cliente no encontrado:", err);
+    res.status(500).json({ message: "Error updating missing client" });
+  }
+};
 
 module.exports = {
   makeRoute,
+  getDriverCurrentRoute,
+  updateStopDispatchStatus,
+  updateMissingClientResolution,
 };
