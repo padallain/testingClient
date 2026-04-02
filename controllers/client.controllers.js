@@ -1,4 +1,5 @@
 const Client = require("../models/client.model");
+const ClientLocationReport = require("../models/clientLocationReport.model");
 
 // REGISTRO DE USUARIO (CLIENTE)
 const registerClient = async (req, res) => {
@@ -57,8 +58,79 @@ const getClient = async (req, res) => {
   }
 };
 
+const deleteClient = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ message: "Client ID is required" });
+    }
+
+    const deletedClient = await Client.findOneAndDelete({ id });
+
+    if (!deletedClient) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    res.status(200).json({
+      message: "Client deleted successfully",
+      client: deletedClient,
+    });
+  } catch (err) {
+    console.log("Error eliminando cliente:", err);
+    res.status(500).json({ message: "Error deleting client" });
+  }
+};
+
+const createClientLocationReport = async (req, res) => {
+  try {
+    const { clientId, reporterName, details } = req.body;
+
+    if (!clientId || !details) {
+      return res.status(400).json({ message: "Client ID and details are required" });
+    }
+
+    const normalizedClientId = String(clientId).trim();
+    const normalizedDetails = String(details).trim();
+
+    if (!normalizedClientId || !normalizedDetails) {
+      return res.status(400).json({ message: "Client ID and details are required" });
+    }
+
+    const client = await Client.findOne({ id: normalizedClientId });
+
+    const report = new ClientLocationReport({
+      clientId: normalizedClientId,
+      reporterName: reporterName ? String(reporterName).trim() : "",
+      details: normalizedDetails,
+      clientFound: Boolean(client),
+      clientSnapshot: client
+        ? {
+            id: client.id,
+            nombre: client.nombre,
+            location: client.location,
+            schedule: client.schedule,
+          }
+        : undefined,
+    });
+
+    await report.save();
+
+    res.status(201).json({
+      message: "Client location report registered successfully",
+      reportId: report._id,
+      clientFound: report.clientFound,
+    });
+  } catch (err) {
+    console.log("Error registrando denuncia de cliente:", err);
+    res.status(500).json({ message: "Error registering client location report" });
+  }
+};
+
 module.exports = {
   registerClient,
   countClients,
   getClient,
+  deleteClient,
+  createClientLocationReport,
 };
