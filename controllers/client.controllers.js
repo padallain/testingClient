@@ -140,6 +140,30 @@ const listClientLocationReports = async (_req, res) => {
   }
 };
 
+const deleteClientLocationReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+
+    if (!reportId) {
+      return res.status(400).json({ message: "Report ID is required" });
+    }
+
+    const deletedReport = await ClientLocationReport.findByIdAndDelete(reportId);
+
+    if (!deletedReport) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    res.status(200).json({
+      message: "Client location report deleted successfully",
+      report: deletedReport,
+    });
+  } catch (err) {
+    console.log("Error eliminando denuncia de cliente:", err);
+    res.status(500).json({ message: "Error deleting client location report" });
+  }
+};
+
 module.exports = {
   registerClient,
   countClients,
@@ -147,4 +171,5 @@ module.exports = {
   deleteClient,
   createClientLocationReport,
   listClientLocationReports,
+  deleteClientLocationReport,
 };
