@@ -1,5 +1,6 @@
 const Client = require("../models/client.model");
 const RouteAssignment = require("../models/routeAssignment.model");
+const DispatchIssueReport = require("../models/dispatchIssueReport.model");
 
 const ORIGIN = { latitude: 10.578208693113535, longitude: -71.67338068775426 };
 const START_ID = "317554345";
@@ -366,9 +367,75 @@ const updateMissingClientResolution = async (req, res) => {
   }
 };
 
+const createDispatchIssueReport = async (req, res) => {
+  try {
+    const { routeId, clientId } = req.params;
+    const { orderNumber, productId, novelty, presentationType, quantity } = req.body;
+
+    const normalizedOrderNumber = String(orderNumber || "").trim();
+    const normalizedProductId = String(productId || "").trim();
+    const normalizedNovelty = String(novelty || "").trim();
+    const normalizedPresentationType = String(presentationType || "").trim().toLowerCase();
+    const normalizedQuantity = Number(quantity);
+
+    if (!routeId || !clientId || !normalizedOrderNumber || !normalizedProductId || !normalizedNovelty) {
+      return res.status(400).json({
+        message: "Route ID, client ID, order number, product ID and novelty are required",
+      });
+    }
+
+    if (!["caja", "unidad"].includes(normalizedPresentationType)) {
+      return res.status(400).json({ message: "Presentation type must be caja or unidad" });
+    }
+
+    if (!Number.isInteger(normalizedQuantity) || normalizedQuantity < 1) {
+      return res.status(400).json({ message: "Quantity must be an integer greater than or equal to 1" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const stop = assignment.stops.find((item) => item.clientId === clientId);
+
+    if (!stop) {
+      return res.status(404).json({ message: "Stop not found in route" });
+    }
+
+    const report = new DispatchIssueReport({
+      routeId: assignment._id,
+      routeLabel: assignment.routeLabel,
+      driverId: assignment.driverId,
+      driverName: assignment.driverName,
+      clientId: stop.clientId,
+      clientName: stop.nombre,
+      stopOrder: stop.order,
+      orderNumber: normalizedOrderNumber,
+      productId: normalizedProductId,
+      novelty: normalizedNovelty,
+      presentationType: normalizedPresentationType,
+      quantity: normalizedQuantity,
+    });
+
+    await report.save();
+
+    res.status(201).json({
+      message: "Dispatch issue report registered successfully",
+      reportId: report._id,
+      report,
+    });
+  } catch (err) {
+    console.log("Error registrando novedad de despacho:", err);
+    res.status(500).json({ message: "Error registering dispatch issue report" });
+  }
+};
+
 module.exports = {
   makeRoute,
   getDriverCurrentRoute,
   updateStopDispatchStatus,
   updateMissingClientResolution,
+  createDispatchIssueReport,
 };
