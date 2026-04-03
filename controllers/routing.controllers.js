@@ -461,6 +461,42 @@ const listDispatchIssueReports = async (_req, res) => {
   }
 };
 
+const getRouteDispatchIssueSummary = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId).lean();
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const reports = await DispatchIssueReport.find({ routeId: assignment._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      route: {
+        routeId: assignment._id,
+        routeLabel: assignment.routeLabel,
+        driverId: assignment.driverId,
+        driverName: assignment.driverName,
+        status: assignment.status,
+        uniqueClientCount: assignment.uniqueClientCount,
+        totalWeight: assignment.totalWeight,
+      },
+      reports,
+    });
+  } catch (err) {
+    console.log("Error obteniendo resumen de novedades por ruta:", err);
+    res.status(500).json({ message: "Error getting route dispatch issue summary" });
+  }
+};
+
 module.exports = {
   makeRoute,
   getDriverCurrentRoute,
@@ -468,4 +504,5 @@ module.exports = {
   updateMissingClientResolution,
   createDispatchIssueReport,
   listDispatchIssueReports,
+  getRouteDispatchIssueSummary,
 };
