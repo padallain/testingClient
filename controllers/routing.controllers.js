@@ -448,10 +448,24 @@ const createDispatchIssueReport = async (req, res) => {
   }
 };
 
+const listDispatchIssueReports = async (_req, res) => {
+  try {
+    const reports = await DispatchIssueReport.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({ reports });
+  } catch (err) {
+    console.log("Error obteniendo novedades de despacho:", err);
+    res.status(500).json({ message: "Error getting dispatch issue reports" });
+  }
+};
+
 module.exports = {
   makeRoute,
   getDriverCurrentRoute,
   updateStopDispatchStatus,
   updateMissingClientResolution,
   createDispatchIssueReport,
+  listDispatchIssueReports,
 };
