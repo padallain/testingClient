@@ -1,6 +1,6 @@
 const express = require('express');
 const { register, login, authMiddleware } = require('../controllers/auth.controllers');
-const { makeRoute, getDriverCurrentRoute, updateStopDispatchStatus, updateMissingClientResolution, createDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
+const { makeRoute, getDriverCurrentRoute, updateStopDispatchStatus, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks } = require('../controllers/dailyCheck.controllers');
 const router = express.Router();
@@ -48,6 +48,8 @@ router.patch('/driver-routes/:routeId/stops/:clientId/dispatch', updateStopDispa
 router.patch('/driver-routes/:routeId/missing/:clientId/resolve', updateMissingClientResolution);
 router.post('/driver-routes/:routeId/stops/:clientId/issues', createDispatchIssueReport);
 router.get('/internal/admin/dispatchIssueReports', requireAdminDeleteKey, listDispatchIssueReports);
+router.patch('/internal/admin/dispatchIssueReports/:reportId', requireAdminDeleteKey, updateDispatchIssueReport);
+router.delete('/internal/admin/dispatchIssueReports/:reportId', requireAdminDeleteKey, deleteDispatchIssueReport);
 router.post('/dailyCheck', createDailyCheck);
 router.get('/dailyCheck', getRecentDailyChecks);
 router.get('/dailyCheck/placa/:placa', getDailyChecksByPlaca);

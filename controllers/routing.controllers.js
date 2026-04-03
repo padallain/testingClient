@@ -93,6 +93,33 @@ const calculateRouteStatus = (assignment) => {
   return allStopsDispatched && allMissingResolved ? "completed" : "active";
 };
 
+const normalizeDispatchIssueItems = (items, fallbackItem) => {
+  const rawItems = Array.isArray(items) && items.length > 0
+    ? items
+    : [fallbackItem];
+
+  return rawItems
+    .map((item) => ({
+      productId: String(item?.productId || "").trim(),
+      novelty: String(item?.novelty || "").trim(),
+      presentationType: String(item?.presentationType || "").trim().toLowerCase(),
+      quantity: Number(item?.quantity),
+    }))
+    .filter((item) => item.productId || item.novelty || item.presentationType || Number.isFinite(item.quantity));
+};
+
+const hasInvalidDispatchIssueItems = (items) => items.some((item) => {
+  if (!item.productId || !item.novelty) {
+    return true;
+  }
+
+  if (!["caja", "unidad"].includes(item.presentationType)) {
+    return true;
+  }
+
+  return !Number.isInteger(item.quantity) || item.quantity < 1;
+});
+
 const makeRoute = async (req, res) => {
   try {
     const { ids, stops, driverId, driverName, routeLabel } = req.body;
@@ -373,19 +400,7 @@ const createDispatchIssueReport = async (req, res) => {
     const { orderNumber, items, productId, novelty, presentationType, quantity } = req.body;
 
     const normalizedOrderNumber = String(orderNumber || "").trim();
-
-    const rawItems = Array.isArray(items) && items.length > 0
-      ? items
-      : [{ productId, novelty, presentationType, quantity }];
-
-    const normalizedItems = rawItems
-      .map((item) => ({
-        productId: String(item?.productId || "").trim(),
-        novelty: String(item?.novelty || "").trim(),
-        presentationType: String(item?.presentationType || "").trim().toLowerCase(),
-        quantity: Number(item?.quantity),
-      }))
-      .filter((item) => item.productId || item.novelty || item.presentationType || Number.isFinite(item.quantity));
+    const normalizedItems = normalizeDispatchIssueItems(items, { productId, novelty, presentationType, quantity });
 
     if (!routeId || !clientId || !normalizedOrderNumber || normalizedItems.length === 0) {
       return res.status(400).json({
@@ -393,17 +408,7 @@ const createDispatchIssueReport = async (req, res) => {
       });
     }
 
-    const hasInvalidItem = normalizedItems.some((item) => {
-      if (!item.productId || !item.novelty) {
-        return true;
-      }
-
-      if (!["caja", "unidad"].includes(item.presentationType)) {
-        return true;
-      }
-
-      return !Number.isInteger(item.quantity) || item.quantity < 1;
-    });
+    const hasInvalidItem = hasInvalidDispatchIssueItems(normalizedItems);
 
     if (hasInvalidItem) {
       return res.status(400).json({
@@ -445,6 +450,75 @@ const createDispatchIssueReport = async (req, res) => {
   } catch (err) {
     console.log("Error registrando novedad de despacho:", err);
     res.status(500).json({ message: "Error registering dispatch issue report" });
+  }
+};
+
+const updateDispatchIssueReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { orderNumber, items, productId, novelty, presentationType, quantity } = req.body;
+
+    if (!reportId) {
+      return res.status(400).json({ message: "Report ID is required" });
+    }
+
+    const normalizedOrderNumber = String(orderNumber || "").trim();
+    const normalizedItems = normalizeDispatchIssueItems(items, { productId, novelty, presentationType, quantity });
+
+    if (!normalizedOrderNumber || normalizedItems.length === 0) {
+      return res.status(400).json({
+        message: "Order number and at least one product issue are required",
+      });
+    }
+
+    if (hasInvalidDispatchIssueItems(normalizedItems)) {
+      return res.status(400).json({
+        message: "Each product issue must include product ID, novelty, presentation type caja|unidad and a quantity of at least 1",
+      });
+    }
+
+    const report = await DispatchIssueReport.findById(reportId);
+
+    if (!report) {
+      return res.status(404).json({ message: "Dispatch issue report not found" });
+    }
+
+    report.orderNumber = normalizedOrderNumber;
+    report.items = normalizedItems;
+
+    await report.save();
+
+    res.status(200).json({
+      message: "Dispatch issue report updated successfully",
+      report,
+    });
+  } catch (err) {
+    console.log("Error actualizando novedad de despacho:", err);
+    res.status(500).json({ message: "Error updating dispatch issue report" });
+  }
+};
+
+const deleteDispatchIssueReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+
+    if (!reportId) {
+      return res.status(400).json({ message: "Report ID is required" });
+    }
+
+    const deletedReport = await DispatchIssueReport.findByIdAndDelete(reportId);
+
+    if (!deletedReport) {
+      return res.status(404).json({ message: "Dispatch issue report not found" });
+    }
+
+    res.status(200).json({
+      message: "Dispatch issue report deleted successfully",
+      report: deletedReport,
+    });
+  } catch (err) {
+    console.log("Error eliminando novedad de despacho:", err);
+    res.status(500).json({ message: "Error deleting dispatch issue report" });
   }
 };
 
@@ -503,6 +577,8 @@ module.exports = {
   updateStopDispatchStatus,
   updateMissingClientResolution,
   createDispatchIssueReport,
+  updateDispatchIssueReport,
+  deleteDispatchIssueReport,
   listDispatchIssueReports,
   getRouteDispatchIssueSummary,
 };
