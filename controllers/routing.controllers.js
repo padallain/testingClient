@@ -370,26 +370,45 @@ const updateMissingClientResolution = async (req, res) => {
 const createDispatchIssueReport = async (req, res) => {
   try {
     const { routeId, clientId } = req.params;
-    const { orderNumber, productId, novelty, presentationType, quantity } = req.body;
+    const { orderNumber, items, productId, novelty, presentationType, quantity } = req.body;
 
     const normalizedOrderNumber = String(orderNumber || "").trim();
-    const normalizedProductId = String(productId || "").trim();
-    const normalizedNovelty = String(novelty || "").trim();
-    const normalizedPresentationType = String(presentationType || "").trim().toLowerCase();
-    const normalizedQuantity = Number(quantity);
 
-    if (!routeId || !clientId || !normalizedOrderNumber || !normalizedProductId || !normalizedNovelty) {
+    const rawItems = Array.isArray(items) && items.length > 0
+      ? items
+      : [{ productId, novelty, presentationType, quantity }];
+
+    const normalizedItems = rawItems
+      .map((item) => ({
+        productId: String(item?.productId || "").trim(),
+        novelty: String(item?.novelty || "").trim(),
+        presentationType: String(item?.presentationType || "").trim().toLowerCase(),
+        quantity: Number(item?.quantity),
+      }))
+      .filter((item) => item.productId || item.novelty || item.presentationType || Number.isFinite(item.quantity));
+
+    if (!routeId || !clientId || !normalizedOrderNumber || normalizedItems.length === 0) {
       return res.status(400).json({
-        message: "Route ID, client ID, order number, product ID and novelty are required",
+        message: "Route ID, client ID, order number and at least one product issue are required",
       });
     }
 
-    if (!["caja", "unidad"].includes(normalizedPresentationType)) {
-      return res.status(400).json({ message: "Presentation type must be caja or unidad" });
-    }
+    const hasInvalidItem = normalizedItems.some((item) => {
+      if (!item.productId || !item.novelty) {
+        return true;
+      }
 
-    if (!Number.isInteger(normalizedQuantity) || normalizedQuantity < 1) {
-      return res.status(400).json({ message: "Quantity must be an integer greater than or equal to 1" });
+      if (!["caja", "unidad"].includes(item.presentationType)) {
+        return true;
+      }
+
+      return !Number.isInteger(item.quantity) || item.quantity < 1;
+    });
+
+    if (hasInvalidItem) {
+      return res.status(400).json({
+        message: "Each product issue must include product ID, novelty, presentation type caja|unidad and a quantity of at least 1",
+      });
     }
 
     const assignment = await RouteAssignment.findById(routeId);
@@ -413,10 +432,7 @@ const createDispatchIssueReport = async (req, res) => {
       clientName: stop.nombre,
       stopOrder: stop.order,
       orderNumber: normalizedOrderNumber,
-      productId: normalizedProductId,
-      novelty: normalizedNovelty,
-      presentationType: normalizedPresentationType,
-      quantity: normalizedQuantity,
+      items: normalizedItems,
     });
 
     await report.save();
