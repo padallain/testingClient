@@ -36,6 +36,7 @@ router.post('/registerClient', registerClient);
 router.get('/countClients', countClients);
 router.get('/getClient/:id', getClient);
 router.post('/clientLocationReports', createClientLocationReport);
+router.get('/clientLocationReports', listClientLocationReports);
 router.get('/internal/admin/clientLocationReports', requireAdminDeleteKey, listClientLocationReports);
 router.delete('/internal/admin/clientLocationReports/:reportId', requireAdminDeleteKey, deleteClientLocationReport);
 router.delete('/internal/admin/deleteClient/:id', requireAdminDeleteKey, deleteClient);
