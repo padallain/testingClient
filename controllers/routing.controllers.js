@@ -122,11 +122,11 @@ const getDriverCurrentRoute = async (req, res) => {
     }
 
     const normalizedDriverId = String(driverId).trim();
-    const routeAssignment = await RouteAssignment.findOne({ driverId: normalizedDriverId, status: "active" })
+    const activeRoutes = await RouteAssignment.find({ driverId: normalizedDriverId, status: "active" })
       .sort({ createdAt: -1 })
       .lean();
 
-    const latestRoute = routeAssignment || await RouteAssignment.findOne({ driverId: normalizedDriverId })
+    const latestRoute = activeRoutes[0] || await RouteAssignment.findOne({ driverId: normalizedDriverId })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -134,7 +134,10 @@ const getDriverCurrentRoute = async (req, res) => {
       return res.status(404).json({ message: "No route found for this driver" });
     }
 
-    res.status(200).json({ route: latestRoute });
+    res.status(200).json({
+      route: latestRoute,
+      routes: activeRoutes.length > 0 ? activeRoutes : [latestRoute],
+    });
   } catch (err) {
     console.log("Error obteniendo ruta del chofer:", err);
     res.status(500).json({ message: "Error getting driver route" });
