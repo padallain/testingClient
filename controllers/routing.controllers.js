@@ -330,6 +330,103 @@ const getDriverCurrentRoute = async (req, res) => {
   }
 };
 
+const listRouteAssignments = async (_req, res) => {
+  try {
+    const routes = await RouteAssignment.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({ routes });
+  } catch (err) {
+    console.log("Error obteniendo rutas guardadas:", err);
+    res.status(500).json({ message: "Error getting saved routes" });
+  }
+};
+
+const updateRouteAssignment = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+    const { driverId, driverName, routeLabel, totalWeight, status } = req.body;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const normalizedDriverId = String(driverId || "").trim();
+    const normalizedDriverName = String(driverName || "").trim();
+    const normalizedRouteLabel = String(routeLabel || "").trim();
+    const normalizedTotalWeight = normalizeWeight(totalWeight);
+    const normalizedStatus = String(status || "").trim().toLowerCase();
+
+    if (!normalizedDriverId || !normalizedRouteLabel) {
+      return res.status(400).json({ message: "Driver ID and route label are required" });
+    }
+
+    if (!["active", "completed"].includes(normalizedStatus)) {
+      return res.status(400).json({ message: "Status must be active or completed" });
+    }
+
+    assignment.driverId = normalizedDriverId;
+    assignment.driverName = normalizedDriverName;
+    assignment.routeLabel = normalizedRouteLabel;
+    assignment.totalWeight = normalizedTotalWeight;
+    assignment.status = normalizedStatus;
+
+    await assignment.save();
+
+    await DispatchIssueReport.updateMany(
+      { routeId: assignment._id },
+      {
+        $set: {
+          routeLabel: assignment.routeLabel,
+          driverId: assignment.driverId,
+          driverName: assignment.driverName,
+        },
+      },
+    );
+
+    res.status(200).json({
+      message: "Route updated successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error actualizando ruta guardada:", err);
+    res.status(500).json({ message: "Error updating saved route" });
+  }
+};
+
+const deleteRouteAssignment = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const deletedRoute = await RouteAssignment.findByIdAndDelete(routeId);
+
+    if (!deletedRoute) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    await DispatchIssueReport.deleteMany({ routeId: deletedRoute._id });
+
+    res.status(200).json({
+      message: "Route deleted successfully",
+      route: deletedRoute,
+    });
+  } catch (err) {
+    console.log("Error eliminando ruta guardada:", err);
+    res.status(500).json({ message: "Error deleting saved route" });
+  }
+};
+
 const updateStopDispatchStatus = async (req, res) => {
   try {
     const { routeId, clientId } = req.params;
@@ -574,6 +671,9 @@ const getRouteDispatchIssueSummary = async (req, res) => {
 module.exports = {
   makeRoute,
   getDriverCurrentRoute,
+  listRouteAssignments,
+  updateRouteAssignment,
+  deleteRouteAssignment,
   updateStopDispatchStatus,
   updateMissingClientResolution,
   createDispatchIssueReport,
