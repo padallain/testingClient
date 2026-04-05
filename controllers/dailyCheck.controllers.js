@@ -4,6 +4,23 @@ const mongoose = require("mongoose");
 const normalizePlaca = (placa) =>
 	typeof placa === "string" ? placa.trim().toUpperCase() : "";
 
+const normalizeChecklist = (checklist) =>
+	Array.isArray(checklist)
+		? checklist.map((item) => ({
+				nombre: typeof item.nombre === "string" ? item.nombre.trim() : "",
+				estado: item.estado,
+				comentario: typeof item.comentario === "string" ? item.comentario.trim() : "",
+			}))
+		: [];
+
+const hasInvalidChecklistItem = (checklist) =>
+	checklist.find(
+		(item) =>
+			!item.nombre ||
+			!["OK", "NO_OK"].includes(item.estado) ||
+			(item.estado === "NO_OK" && !item.comentario),
+	);
+
 const getRecentDailyChecks = async (req, res) => {
 	try {
 		const requestedLimit = Number(req.query.limit);
@@ -43,18 +60,9 @@ const createDailyCheck = async (req, res) => {
 			});
 		}
 
-		const normalizedChecklist = checklist.map((item) => ({
-			nombre: typeof item.nombre === "string" ? item.nombre.trim() : "",
-			estado: item.estado,
-			comentario: typeof item.comentario === "string" ? item.comentario.trim() : "",
-		}));
+		const normalizedChecklist = normalizeChecklist(checklist);
 
-		const invalidItem = normalizedChecklist.find(
-			(item) =>
-				!item.nombre ||
-				!["OK", "NO_OK"].includes(item.estado) ||
-				(item.estado === "NO_OK" && !item.comentario),
-		);
+		const invalidItem = hasInvalidChecklistItem(normalizedChecklist);
 
 		if (invalidItem) {
 			return res.status(400).json({
@@ -143,9 +151,101 @@ const getDailyCheckById = async (req, res) => {
 	}
 };
 
+const updateDailyCheck = async (req, res) => {
+	try {
+		const { id } = req.params;
+		const { chofer, placa, modelo, anio, checklist, observaciones } = req.body;
+
+		if (!mongoose.Types.ObjectId.isValid(id)) {
+			return res.status(400).json({
+				message: "El id del daily check no es valido",
+			});
+		}
+
+		if (!chofer || !placa || !modelo || !anio) {
+			return res.status(400).json({
+				message: "Chofer, placa, modelo y anio son obligatorios",
+			});
+		}
+
+		const normalizedChecklist = normalizeChecklist(checklist);
+
+		if (!normalizedChecklist.length) {
+			return res.status(400).json({
+				message: "El checklist es obligatorio",
+			});
+		}
+
+		if (hasInvalidChecklistItem(normalizedChecklist)) {
+			return res.status(400).json({
+				message: "Cada item debe tener nombre, estado valido y comentario cuando sea No OK",
+			});
+		}
+
+		const dailyCheck = await DailyCheck.findById(id);
+
+		if (!dailyCheck) {
+			return res.status(404).json({
+				message: "Reporte diario no encontrado",
+			});
+		}
+
+		dailyCheck.chofer = chofer.trim();
+		dailyCheck.placa = normalizePlaca(placa);
+		dailyCheck.modelo = modelo.trim();
+		dailyCheck.anio = Number(anio);
+		dailyCheck.checklist = normalizedChecklist;
+		dailyCheck.observaciones = typeof observaciones === "string" ? observaciones.trim() : "";
+
+		await dailyCheck.save();
+
+		return res.status(200).json({
+			message: "Reporte diario actualizado correctamente",
+			dailyCheck,
+		});
+	} catch (error) {
+		console.log("Error actualizando daily check:", error);
+		return res.status(500).json({
+			message: "Error actualizando el reporte diario",
+		});
+	}
+};
+
+const deleteDailyCheck = async (req, res) => {
+	try {
+		const { id } = req.params;
+
+		if (!mongoose.Types.ObjectId.isValid(id)) {
+			return res.status(400).json({
+				message: "El id del daily check no es valido",
+			});
+		}
+
+		const deletedDailyCheck = await DailyCheck.findByIdAndDelete(id);
+
+		if (!deletedDailyCheck) {
+			return res.status(404).json({
+				message: "Reporte diario no encontrado",
+			});
+		}
+
+		return res.status(200).json({
+			message: "Reporte diario eliminado correctamente",
+			dailyCheck: deletedDailyCheck,
+		});
+	} catch (error) {
+		console.log("Error eliminando daily check:", error);
+		return res.status(500).json({
+			message: "Error eliminando el reporte diario",
+		});
+	}
+};
+
 module.exports = {
 	getRecentDailyChecks,
 	createDailyCheck,
 	getDailyCheckById,
 	getDailyChecksByPlaca,
+	updateDailyCheck,
+	deleteDailyCheck,
 };

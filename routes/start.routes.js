@@ -2,7 +2,7 @@ const express = require('express');
 const { register, login, authMiddleware } = require('../controllers/auth.controllers');
 const { makeRoute, getDriverCurrentRoute, listRouteAssignments, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
-const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks } = require('../controllers/dailyCheck.controllers');
+const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const router = express.Router();
 
 router.use(express.json());
@@ -58,5 +58,7 @@ router.post('/dailyCheck', createDailyCheck);
 router.get('/dailyCheck', getRecentDailyChecks);
 router.get('/dailyCheck/placa/:placa', getDailyChecksByPlaca);
 router.get('/dailyCheck/:id', getDailyCheckById);
+router.patch('/internal/admin/dailyCheck/:id', requireAdminDeleteKey, updateDailyCheck);
+router.delete('/internal/admin/dailyCheck/:id', requireAdminDeleteKey, deleteDailyCheck);
 
 module.exports = router;
