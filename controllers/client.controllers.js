@@ -45,13 +45,23 @@ const getClient = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const client = await Client.findOne({ id });
+    const client = await Client.findOne({ id }).lean();
 
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    res.status(200).json(client);
+    const hasValidCoordinates =
+      client.location &&
+      Number.isFinite(Number(client.location.latitude)) &&
+      Number.isFinite(Number(client.location.longitude));
+
+    res.status(200).json({
+      ...client,
+      googleMapsLink: hasValidCoordinates
+        ? `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`
+        : "",
+    });
   } catch (err) {
     console.log("Error obteniendo cliente:", err);
     res.status(500).json({ message: "Error getting client" });
