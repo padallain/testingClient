@@ -304,6 +304,7 @@ module.exports = {
   buildRouteOptions,
   buildRouteArtifacts,
   buildRouteLabel,
+  calculateRouteDistance,
   normalizeRequestedStops,
   normalizeWeight,
 };

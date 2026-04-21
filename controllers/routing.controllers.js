@@ -6,6 +6,7 @@ const {
   buildRouteOptions,
   buildRouteArtifacts,
   buildRouteLabel,
+  calculateRouteDistance,
   normalizeRequestedStops,
   normalizeWeight,
 } = require("../services/routePlanning.service");
@@ -42,6 +43,7 @@ const buildAssignmentStops = (routeStops) => routeStops.map((client, index) => (
 const applyRouteArtifactsToAssignment = (assignment, stops) => {
   const normalizedStops = mapStopsForArtifacts(stops);
   const { googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(normalizedStops);
+  const totalDistanceKm = calculateRouteDistance(normalizedStops);
 
   assignment.stops = stops.map((stop, index) => ({
     ...stop,
@@ -49,6 +51,7 @@ const applyRouteArtifactsToAssignment = (assignment, stops) => {
   }));
   assignment.googleMapsRouteLinks = googleMapsRouteLinks;
   assignment.openRouteLink = openRouteLink;
+  assignment.totalDistanceKm = totalDistanceKm;
 };
 
 const makeRoute = async (req, res) => {
@@ -102,6 +105,7 @@ const makeRoute = async (req, res) => {
       };
     });
     const totalWeight = routeWeight;
+    const totalDistanceKm = selectedRouteOption.estimatedDistanceKm;
     const uniqueClientCount = uniqueStops.length;
     const normalizedDriverId = String(driverId || "").trim();
 
@@ -117,9 +121,11 @@ const makeRoute = async (req, res) => {
         routeTypeLabel: selectedRouteOption.label,
         uniqueClientCount,
         totalWeight,
+        totalDistanceKm,
         duplicateClientIds: [...new Set(duplicateClientIds)],
         googleMapsRouteLinks,
         openRouteLink,
+        originalTotalDistanceKm: totalDistanceKm,
         originalGoogleMapsRouteLinks: googleMapsRouteLinks,
         originalOpenRouteLink: openRouteLink,
         status: notFoundClients.length === 0 && response.every((stop) => stop.dispatched)
@@ -139,6 +145,7 @@ const makeRoute = async (req, res) => {
         routeLabel: assignment.routeLabel,
         routeType: selectedRouteOption.type,
         routeTypeLabel: selectedRouteOption.label,
+        totalDistanceKm: assignment.totalDistanceKm,
         status: assignment.status,
       };
     }
@@ -156,6 +163,7 @@ const makeRoute = async (req, res) => {
       duplicateClientIds: [...new Set(duplicateClientIds)],
       uniqueClientCount,
       totalWeight,
+      totalDistanceKm,
       savedRoute,
     });
   } catch (err) {
@@ -428,6 +436,7 @@ const resetDriverRoute = async (req, res) => {
       ? assignment.originalGoogleMapsRouteLinks
       : [];
     assignment.openRouteLink = assignment.originalOpenRouteLink || "";
+    assignment.totalDistanceKm = Number(assignment.originalTotalDistanceKm) || 0;
     assignment.wasDriverModified = false;
     assignment.driverModifiedAt = null;
     assignment.status = calculateRouteStatus(assignment);

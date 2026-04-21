@@ -36,9 +36,11 @@ const routeAssignmentSchema = new mongoose.Schema(
     routeTypeLabel: { type: String, default: 'Mas cercana', trim: true },
     uniqueClientCount: { type: Number, required: true, min: 0 },
     totalWeight: { type: Number, required: true, min: 0 },
+    totalDistanceKm: { type: Number, default: 0, min: 0 },
     duplicateClientIds: { type: [String], default: [] },
     googleMapsRouteLinks: { type: [String], default: [] },
     openRouteLink: { type: String, default: '' },
+    originalTotalDistanceKm: { type: Number, default: 0, min: 0 },
     originalGoogleMapsRouteLinks: { type: [String], default: [] },
     originalOpenRouteLink: { type: String, default: '' },
     status: {
