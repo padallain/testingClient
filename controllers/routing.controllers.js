@@ -19,6 +19,38 @@ const {
   calculateRouteStatus,
 } = require("../services/routeStatus.service");
 
+const mapStopsForArtifacts = (stops) => (Array.isArray(stops)
+  ? stops.map((stop) => ({
+      id: stop.clientId,
+      nombre: stop.nombre,
+      weight: stop.weight,
+      location: stop.location,
+    }))
+  : []);
+
+const buildAssignmentStops = (routeStops) => routeStops.map((client, index) => ({
+  order: index + 1,
+  clientId: client.id,
+  nombre: client.nombre,
+  weight: Number(client.weight) || 0,
+  location: client.location,
+  googleMapsLink: client.googleMapsLink,
+  dispatched: false,
+  dispatchedAt: null,
+}));
+
+const applyRouteArtifactsToAssignment = (assignment, stops) => {
+  const normalizedStops = mapStopsForArtifacts(stops);
+  const { googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(normalizedStops);
+
+  assignment.stops = stops.map((stop, index) => ({
+    ...stop,
+    order: index + 1,
+  }));
+  assignment.googleMapsRouteLinks = googleMapsRouteLinks;
+  assignment.openRouteLink = openRouteLink;
+};
+
 const makeRoute = async (req, res) => {
   try {
     const { ids, stops, driverId, driverName, routeLabel, routeType } = req.body;
@@ -76,27 +108,25 @@ const makeRoute = async (req, res) => {
     let savedRoute = null;
 
     if (normalizedDriverId) {
+      const assignmentStops = buildAssignmentStops(response);
       const assignment = new RouteAssignment({
         driverId: normalizedDriverId,
         driverName: typeof driverName === "string" ? driverName.trim() : "",
         routeLabel: buildRouteLabel(normalizedDriverId, routeLabel),
+        routeType: selectedRouteOption.type,
+        routeTypeLabel: selectedRouteOption.label,
         uniqueClientCount,
         totalWeight,
         duplicateClientIds: [...new Set(duplicateClientIds)],
         googleMapsRouteLinks,
         openRouteLink,
+        originalGoogleMapsRouteLinks: googleMapsRouteLinks,
+        originalOpenRouteLink: openRouteLink,
         status: notFoundClients.length === 0 && response.every((stop) => stop.dispatched)
           ? "completed"
           : "active",
-        stops: response.map((client, index) => ({
-          order: index + 1,
-          clientId: client.id,
-          nombre: client.nombre,
-          location: client.location,
-          googleMapsLink: client.googleMapsLink,
-          dispatched: false,
-          dispatchedAt: null,
-        })),
+        stops: assignmentStops,
+        originalStops: assignmentStops,
         missingClients: notFoundClients,
       });
 
@@ -310,6 +340,106 @@ const updateStopDispatchStatus = async (req, res) => {
   } catch (err) {
     console.log("Error actualizando despacho del cliente:", err);
     res.status(500).json({ message: "Error updating stop dispatch status" });
+  }
+};
+
+const customizeDriverRoute = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+    const submittedStops = Array.isArray(req.body?.stops) ? req.body.stops : [];
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    if (submittedStops.length === 0) {
+      return res.status(400).json({ message: "At least one stop is required to update the route" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const currentStopsById = new Map(
+      assignment.stops.map((stop) => [String(stop.clientId), stop.toObject ? stop.toObject() : stop]),
+    );
+    const nextStops = [];
+
+    for (const rawStop of submittedStops) {
+      const clientId = String(rawStop?.clientId || "").trim();
+
+      if (!clientId || !currentStopsById.has(clientId)) {
+        return res.status(400).json({ message: `Stop ${clientId || "unknown"} is not part of the assigned route` });
+      }
+
+      nextStops.push(currentStopsById.get(clientId));
+      currentStopsById.delete(clientId);
+    }
+
+    if (currentStopsById.size > 0) {
+      return res.status(400).json({ message: "The customized route must include all assigned stops" });
+    }
+
+    applyRouteArtifactsToAssignment(assignment, nextStops);
+    assignment.wasDriverModified = true;
+    assignment.driverModifiedAt = new Date();
+    assignment.status = calculateRouteStatus(assignment);
+    await assignment.save();
+
+    res.status(200).json({
+      message: "Route customized successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error personalizando ruta del chofer:", err);
+    res.status(500).json({ message: "Error customizing driver route" });
+  }
+};
+
+const resetDriverRoute = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const originalStops = Array.isArray(assignment.originalStops)
+      ? assignment.originalStops.map((stop) => (stop.toObject ? stop.toObject() : stop))
+      : [];
+
+    if (originalStops.length === 0) {
+      return res.status(400).json({ message: "This route does not have an original version to restore" });
+    }
+
+    assignment.stops = originalStops.map((stop, index) => ({
+      ...stop,
+      order: index + 1,
+    }));
+    assignment.googleMapsRouteLinks = Array.isArray(assignment.originalGoogleMapsRouteLinks)
+      ? assignment.originalGoogleMapsRouteLinks
+      : [];
+    assignment.openRouteLink = assignment.originalOpenRouteLink || "";
+    assignment.wasDriverModified = false;
+    assignment.driverModifiedAt = null;
+    assignment.status = calculateRouteStatus(assignment);
+    await assignment.save();
+
+    res.status(200).json({
+      message: "Route restored successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error restaurando ruta del chofer:", err);
+    res.status(500).json({ message: "Error restoring driver route" });
   }
 };
 
@@ -530,6 +660,8 @@ module.exports = {
   updateRouteAssignment,
   deleteRouteAssignment,
   updateStopDispatchStatus,
+  customizeDriverRoute,
+  resetDriverRoute,
   updateMissingClientResolution,
   createDispatchIssueReport,
   updateDispatchIssueReport,
