@@ -88,7 +88,8 @@ const makeRoute = async (req, res) => {
     }
 
     const normalizedRouteType = String(routeType || "").trim().toLowerCase();
-    const selectedRouteOption = routeOptions.find((option) => option.type === normalizedRouteType) || routeOptions[0];
+    const recommendedRouteOption = routeOptions.find((option) => option.type === "closest") || routeOptions[0];
+    const selectedRouteOption = routeOptions.find((option) => option.type === normalizedRouteType) || recommendedRouteOption;
     const { response, googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(selectedRouteOption.route);
     const responseRouteOptions = routeOptions.map((option) => {
       const optionArtifacts = buildRouteArtifacts(option.route);
@@ -113,6 +114,8 @@ const makeRoute = async (req, res) => {
 
     if (normalizedDriverId) {
       const assignmentStops = buildAssignmentStops(response);
+      const recommendedArtifacts = buildRouteArtifacts(recommendedRouteOption.route);
+      const recommendedAssignmentStops = buildAssignmentStops(recommendedArtifacts.response);
       const assignment = new RouteAssignment({
         driverId: normalizedDriverId,
         driverName: typeof driverName === "string" ? driverName.trim() : "",
@@ -125,14 +128,14 @@ const makeRoute = async (req, res) => {
         duplicateClientIds: [...new Set(duplicateClientIds)],
         googleMapsRouteLinks,
         openRouteLink,
-        originalTotalDistanceKm: totalDistanceKm,
-        originalGoogleMapsRouteLinks: googleMapsRouteLinks,
-        originalOpenRouteLink: openRouteLink,
+        originalTotalDistanceKm: recommendedRouteOption.estimatedDistanceKm,
+        originalGoogleMapsRouteLinks: recommendedArtifacts.googleMapsRouteLinks,
+        originalOpenRouteLink: recommendedArtifacts.openRouteLink,
         status: notFoundClients.length === 0 && response.every((stop) => stop.dispatched)
           ? "completed"
           : "active",
         stops: assignmentStops,
-        originalStops: assignmentStops,
+        originalStops: recommendedAssignmentStops,
         missingClients: notFoundClients,
       });
 
@@ -437,6 +440,8 @@ const resetDriverRoute = async (req, res) => {
       : [];
     assignment.openRouteLink = assignment.originalOpenRouteLink || "";
     assignment.totalDistanceKm = Number(assignment.originalTotalDistanceKm) || 0;
+    assignment.routeType = "closest";
+    assignment.routeTypeLabel = "Mas cercana";
     assignment.wasDriverModified = false;
     assignment.driverModifiedAt = null;
     assignment.status = calculateRouteStatus(assignment);
