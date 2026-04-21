@@ -3,7 +3,7 @@ const RouteAssignment = require("../models/routeAssignment.model");
 const DispatchIssueReport = require("../models/dispatchIssueReport.model");
 const {
   buildMissingClients,
-  buildOptimizedRoute,
+  buildRouteOptions,
   buildRouteArtifacts,
   buildRouteLabel,
   normalizeRequestedStops,
@@ -21,7 +21,7 @@ const {
 
 const makeRoute = async (req, res) => {
   try {
-    const { ids, stops, driverId, driverName, routeLabel } = req.body;
+    const { ids, stops, driverId, driverName, routeLabel, routeType } = req.body;
     const routeWeight = normalizeWeight(req.body?.routeWeight);
     const { normalizedStops, uniqueStops, duplicateClientIds } = normalizeRequestedStops({ ids, stops });
 
@@ -40,9 +40,9 @@ const makeRoute = async (req, res) => {
 
     const foundIds = clients.map((client) => client.id);
     const { notFoundIds, notFoundClients } = buildMissingClients(uniqueIds, foundIds);
-    const route = buildOptimizedRoute(clients);
+    const routeOptions = buildRouteOptions(clients);
 
-    if (route.length < 1) {
+    if (routeOptions.length < 1) {
       return res
         .status(400)
         .json({
@@ -52,7 +52,23 @@ const makeRoute = async (req, res) => {
         });
     }
 
-    const { response, googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(route);
+    const normalizedRouteType = String(routeType || "").trim().toLowerCase();
+    const selectedRouteOption = routeOptions.find((option) => option.type === normalizedRouteType) || routeOptions[0];
+    const { response, googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(selectedRouteOption.route);
+    const responseRouteOptions = routeOptions.map((option) => {
+      const optionArtifacts = buildRouteArtifacts(option.route);
+
+      return {
+        type: option.type,
+        label: option.label,
+        description: option.description,
+        estimatedDistanceKm: option.estimatedDistanceKm,
+        route: optionArtifacts.response,
+        routeNames: optionArtifacts.response.map((client) => client.nombre),
+        googleMapsRouteLinks: optionArtifacts.googleMapsRouteLinks,
+        openRouteLink: optionArtifacts.openRouteLink,
+      };
+    });
     const totalWeight = routeWeight;
     const uniqueClientCount = uniqueStops.length;
     const normalizedDriverId = String(driverId || "").trim();
@@ -91,6 +107,8 @@ const makeRoute = async (req, res) => {
         driverId: assignment.driverId,
         driverName: assignment.driverName,
         routeLabel: assignment.routeLabel,
+        routeType: selectedRouteOption.type,
+        routeTypeLabel: selectedRouteOption.label,
         status: assignment.status,
       };
     }
@@ -98,6 +116,9 @@ const makeRoute = async (req, res) => {
     res.status(200).json({
       route: response,
       routeNames: response.map((client) => client.nombre),
+      routeType: selectedRouteOption.type,
+      routeTypeLabel: selectedRouteOption.label,
+      routeOptions: responseRouteOptions,
       googleMapsRouteLinks,
       openRouteLink,
       notFoundIds,
