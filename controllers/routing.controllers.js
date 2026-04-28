@@ -3,6 +3,7 @@ const RouteAssignment = require("../models/routeAssignment.model");
 const DispatchIssueReport = require("../models/dispatchIssueReport.model");
 const {
   buildMissingClients,
+  buildOptimizedRoute,
   buildRouteOptions,
   buildRouteArtifacts,
   buildRouteLabel,
@@ -39,6 +40,67 @@ const buildAssignmentStops = (routeStops) => routeStops.map((client, index) => (
   dispatched: false,
   dispatchedAt: null,
 }));
+
+const mergeStopProgress = (stops, progressSourceStops) => {
+  const progressByClientId = new Map(
+    (Array.isArray(progressSourceStops) ? progressSourceStops : []).map((stop) => [
+      String(stop?.clientId || ""),
+      {
+        dispatched: Boolean(stop?.dispatched),
+        dispatchedAt: stop?.dispatchedAt || null,
+      },
+    ]),
+  );
+
+  return stops.map((stop, index) => {
+    const progress = progressByClientId.get(String(stop?.clientId || ""));
+
+    return {
+      ...stop,
+      order: index + 1,
+      dispatched: progress ? progress.dispatched : Boolean(stop?.dispatched),
+      dispatchedAt: progress ? progress.dispatchedAt : stop?.dispatchedAt || null,
+    };
+  });
+};
+
+const buildRecommendedStopsFromAssignment = (assignment) => {
+  const currentStops = Array.isArray(assignment?.stops)
+    ? assignment.stops.map((stop) => (stop.toObject ? stop.toObject() : stop))
+    : [];
+
+  if (currentStops.length === 0) {
+    return [];
+  }
+
+  const optimizedRoute = buildOptimizedRoute(currentStops.map((stop) => ({
+    id: stop.clientId,
+    nombre: stop.nombre,
+    weight: stop.weight,
+    location: stop.location,
+  })));
+
+  if (optimizedRoute.length === 0) {
+    return [];
+  }
+
+  const stopsByClientId = new Map(currentStops.map((stop) => [String(stop.clientId), stop]));
+
+  return optimizedRoute.map((client, index) => {
+    const existingStop = stopsByClientId.get(String(client.id));
+
+    return {
+      ...existingStop,
+      order: index + 1,
+      clientId: client.id,
+      nombre: client.nombre,
+      weight: Number(client.weight) || 0,
+      location: client.location,
+      googleMapsLink: existingStop?.googleMapsLink
+        || `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`,
+    };
+  });
+};
 
 const applyRouteArtifactsToAssignment = (assignment, stops) => {
   const normalizedStops = mapStopsForArtifacts(stops);
@@ -423,23 +485,28 @@ const resetDriverRoute = async (req, res) => {
       return res.status(404).json({ message: "Route not found" });
     }
 
-    const originalStops = Array.isArray(assignment.originalStops)
+    let originalStops = Array.isArray(assignment.originalStops)
       ? assignment.originalStops.map((stop) => (stop.toObject ? stop.toObject() : stop))
       : [];
 
     if (originalStops.length === 0) {
-      return res.status(400).json({ message: "This route does not have an original version to restore" });
+      originalStops = buildRecommendedStopsFromAssignment(assignment);
+
+      if (originalStops.length === 0) {
+        return res.status(400).json({ message: "This route does not have a recommended version to restore" });
+      }
+
+      assignment.originalStops = originalStops;
+      assignment.originalGoogleMapsRouteLinks = [];
+      assignment.originalOpenRouteLink = "";
+      assignment.originalTotalDistanceKm = calculateRouteDistance(mapStopsForArtifacts(originalStops));
     }
 
-    assignment.stops = originalStops.map((stop, index) => ({
-      ...stop,
-      order: index + 1,
-    }));
-    assignment.googleMapsRouteLinks = Array.isArray(assignment.originalGoogleMapsRouteLinks)
-      ? assignment.originalGoogleMapsRouteLinks
-      : [];
-    assignment.openRouteLink = assignment.originalOpenRouteLink || "";
-    assignment.totalDistanceKm = Number(assignment.originalTotalDistanceKm) || 0;
+    const restoredStops = mergeStopProgress(originalStops, assignment.stops);
+    applyRouteArtifactsToAssignment(assignment, restoredStops);
+    assignment.originalGoogleMapsRouteLinks = assignment.googleMapsRouteLinks;
+    assignment.originalOpenRouteLink = assignment.openRouteLink;
+    assignment.originalTotalDistanceKm = assignment.totalDistanceKm;
     assignment.routeType = "closest";
     assignment.routeTypeLabel = "Mas cercana";
     assignment.wasDriverModified = false;
