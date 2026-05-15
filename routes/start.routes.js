@@ -1,6 +1,6 @@
 const express = require('express');
 const { register, login, authMiddleware } = require('../controllers/auth.controllers');
-const { makeRoute, getDriverCurrentRoute, listRouteAssignments, listRouteDispatchStatuses, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
+const { makeRoute, getDriverCurrentRoute, listRouteAssignments, listRouteDispatchStatuses, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const router = express.Router();
@@ -48,6 +48,7 @@ router.get('/driver-routes/:routeId/issues-summary', getRouteDispatchIssueSummar
 router.patch('/driver-routes/:routeId/customize', customizeDriverRoute);
 router.post('/driver-routes/:routeId/reset', resetDriverRoute);
 router.get('/route-dispatch-status', listRouteDispatchStatuses);
+router.get('/driver-performance-analytics', getDriverPerformanceAnalytics);
 router.get('/internal/admin/routes', requireAdminDeleteKey, listRouteAssignments);
 router.patch('/internal/admin/routes/:routeId', requireAdminDeleteKey, updateRouteAssignment);
 router.delete('/internal/admin/routes/:routeId', requireAdminDeleteKey, deleteRouteAssignment);

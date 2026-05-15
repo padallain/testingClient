@@ -116,6 +116,213 @@ const applyRouteArtifactsToAssignment = (assignment, stops) => {
   assignment.totalDistanceKm = totalDistanceKm;
 };
 
+const MONTH_QUERY_PATTERN = /^\d{4}-\d{2}$/;
+
+const createMonthDateRange = (monthQuery) => {
+  const selectedDate = typeof monthQuery === "string" && MONTH_QUERY_PATTERN.test(monthQuery)
+    ? new Date(`${monthQuery}-01T00:00:00`)
+    : new Date();
+
+  const rangeStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+  const rangeEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 1);
+
+  return {
+    selectedMonth: `${rangeStart.getFullYear()}-${String(rangeStart.getMonth() + 1).padStart(2, "0")}`,
+    rangeStart,
+    rangeEnd,
+  };
+};
+
+const buildAnalyticsMonthLabel = (date) => date.toLocaleDateString("es-MX", {
+  month: "short",
+  year: "numeric",
+});
+
+const summarizeDriverAnalytics = (routes) => {
+  const driversMap = new Map();
+
+  routes.forEach((route) => {
+    const driverId = String(route?.driverId || "SIN_CHOFER").trim() || "SIN_CHOFER";
+    const driverName = String(route?.driverName || "").trim();
+    const stops = Array.isArray(route?.stops) ? route.stops : [];
+    const missingClients = Array.isArray(route?.missingClients) ? route.missingClients : [];
+    const dispatchedCount = stops.filter((stop) => stop?.dispatched).length;
+    const resolvedMissingCount = missingClients.filter((item) => item?.resolved).length;
+    const assignedUnits = stops.length + missingClients.length;
+    const completedUnits = dispatchedCount + resolvedMissingCount;
+    const pendingUnits = Math.max(assignedUnits - completedUnits, 0);
+    const routeStatus = route?.status || calculateRouteStatus(route);
+    const currentDriver = driversMap.get(driverId) || {
+      driverId,
+      driverName: driverName || driverId,
+      routeCount: 0,
+      completedRoutes: 0,
+      activeRoutes: 0,
+      totalKg: 0,
+      totalClients: 0,
+      dispatchedCount: 0,
+      resolvedMissingCount: 0,
+      pendingCount: 0,
+      totalDistanceKm: 0,
+      assignedUnits: 0,
+      completedUnits: 0,
+      lastRouteAt: null,
+    };
+
+    currentDriver.routeCount += 1;
+    currentDriver.completedRoutes += routeStatus === "completed" ? 1 : 0;
+    currentDriver.activeRoutes += routeStatus === "active" ? 1 : 0;
+    currentDriver.totalKg += Number(route?.totalWeight) || 0;
+    currentDriver.totalClients += Number(route?.uniqueClientCount) || 0;
+    currentDriver.dispatchedCount += dispatchedCount;
+    currentDriver.resolvedMissingCount += resolvedMissingCount;
+    currentDriver.pendingCount += pendingUnits;
+    currentDriver.totalDistanceKm += Number(route?.totalDistanceKm) || 0;
+    currentDriver.assignedUnits += assignedUnits;
+    currentDriver.completedUnits += completedUnits;
+
+    const routeDate = route?.updatedAt || route?.createdAt || null;
+
+    if (!currentDriver.lastRouteAt || new Date(routeDate) > new Date(currentDriver.lastRouteAt)) {
+      currentDriver.lastRouteAt = routeDate;
+    }
+
+    if (!currentDriver.driverName && driverName) {
+      currentDriver.driverName = driverName;
+    }
+
+    driversMap.set(driverId, currentDriver);
+  });
+
+  return [...driversMap.values()]
+    .map((driver) => ({
+      ...driver,
+      totalKg: Number(driver.totalKg.toFixed(2)),
+      totalDistanceKm: Number(driver.totalDistanceKm.toFixed(2)),
+      completionRate: driver.routeCount > 0
+        ? Math.round((driver.completedRoutes / driver.routeCount) * 100)
+        : 0,
+      dispatchRate: driver.assignedUnits > 0
+        ? Math.round((driver.completedUnits / driver.assignedUnits) * 100)
+        : 0,
+      avgKgPerRoute: driver.routeCount > 0
+        ? Number((driver.totalKg / driver.routeCount).toFixed(2))
+        : 0,
+      avgClientsPerRoute: driver.routeCount > 0
+        ? Number((driver.totalClients / driver.routeCount).toFixed(1))
+        : 0,
+      avgDistancePerRoute: driver.routeCount > 0
+        ? Number((driver.totalDistanceKm / driver.routeCount).toFixed(2))
+        : 0,
+    }))
+    .sort((currentDriver, nextDriver) => {
+      if (nextDriver.completedRoutes !== currentDriver.completedRoutes) {
+        return nextDriver.completedRoutes - currentDriver.completedRoutes;
+      }
+
+      if (nextDriver.totalKg !== currentDriver.totalKg) {
+        return nextDriver.totalKg - currentDriver.totalKg;
+      }
+
+      return nextDriver.totalClients - currentDriver.totalClients;
+    });
+};
+
+const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
+  const totals = driverAnalytics.reduce((accumulator, driver) => ({
+    totalKg: accumulator.totalKg + driver.totalKg,
+    totalClients: accumulator.totalClients + driver.totalClients,
+    completedRoutes: accumulator.completedRoutes + driver.completedRoutes,
+    activeRoutes: accumulator.activeRoutes + driver.activeRoutes,
+    pendingCount: accumulator.pendingCount + driver.pendingCount,
+    assignedUnits: accumulator.assignedUnits + driver.assignedUnits,
+    completedUnits: accumulator.completedUnits + driver.completedUnits,
+  }), {
+    totalKg: 0,
+    totalClients: 0,
+    completedRoutes: 0,
+    activeRoutes: 0,
+    pendingCount: 0,
+    assignedUnits: 0,
+    completedUnits: 0,
+  });
+
+  return {
+    drivers: driverAnalytics.length,
+    routes: totalRoutes,
+    totalKg: Number(totals.totalKg.toFixed(2)),
+    totalClients: totals.totalClients,
+    completedRoutes: totals.completedRoutes,
+    activeRoutes: totals.activeRoutes,
+    completionRate: totalRoutes > 0
+      ? Math.round((totals.completedRoutes / totalRoutes) * 100)
+      : 0,
+    dispatchRate: totals.assignedUnits > 0
+      ? Math.round((totals.completedUnits / totals.assignedUnits) * 100)
+      : 0,
+    pendingCount: totals.pendingCount,
+    avgKgPerDriver: driverAnalytics.length > 0
+      ? Number((totals.totalKg / driverAnalytics.length).toFixed(2))
+      : 0,
+    avgClientsPerDriver: driverAnalytics.length > 0
+      ? Number((totals.totalClients / driverAnalytics.length).toFixed(1))
+      : 0,
+  };
+};
+
+const buildMonthlyAnalyticsHistory = (routes, selectedMonthStart) => {
+  const historyMonths = Array.from({ length: 6 }, (_, index) => {
+    const monthDate = new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() - (5 - index), 1);
+
+    return {
+      key: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`,
+      label: buildAnalyticsMonthLabel(monthDate),
+      date: monthDate,
+      routes: 0,
+      completedRoutes: 0,
+      totalKg: 0,
+      totalClients: 0,
+      activeDrivers: new Set(),
+    };
+  });
+
+  const historyByMonth = new Map(historyMonths.map((month) => [month.key, month]));
+
+  routes.forEach((route) => {
+    const routeDate = route?.createdAt ? new Date(route.createdAt) : null;
+
+    if (!routeDate || Number.isNaN(routeDate.getTime())) {
+      return;
+    }
+
+    const monthKey = `${routeDate.getFullYear()}-${String(routeDate.getMonth() + 1).padStart(2, "0")}`;
+    const monthBucket = historyByMonth.get(monthKey);
+
+    if (!monthBucket) {
+      return;
+    }
+
+    monthBucket.routes += 1;
+    monthBucket.completedRoutes += route?.status === "completed" ? 1 : 0;
+    monthBucket.totalKg += Number(route?.totalWeight) || 0;
+    monthBucket.totalClients += Number(route?.uniqueClientCount) || 0;
+    monthBucket.activeDrivers.add(String(route?.driverId || "SIN_CHOFER"));
+  });
+
+  return historyMonths.map((month) => ({
+    month: month.key,
+    label: month.label,
+    routes: month.routes,
+    completedRoutes: month.completedRoutes,
+    totalKg: Number(month.totalKg.toFixed(2)),
+    totalClients: month.totalClients,
+    activeDrivers: month.activeDrivers.size,
+    completionRate: month.routes > 0
+      ? Math.round((month.completedRoutes / month.routes) * 100)
+      : 0,
+  }));
+};
+
 const makeRoute = async (req, res) => {
   try {
     const { ids, stops, driverId, driverName, routeLabel, routeType } = req.body;
@@ -297,6 +504,48 @@ const listRouteDispatchStatuses = async (_req, res) => {
   } catch (err) {
     console.log("Error obteniendo estatus de despachos:", err);
     res.status(500).json({ message: "Error getting route dispatch statuses" });
+  }
+};
+
+const getDriverPerformanceAnalytics = async (req, res) => {
+  try {
+    const { selectedMonth, rangeStart, rangeEnd } = createMonthDateRange(req.query?.month);
+    const historyRangeStart = new Date(rangeStart.getFullYear(), rangeStart.getMonth() - 5, 1);
+
+    const routes = await RouteAssignment.find({
+      createdAt: {
+        $gte: historyRangeStart,
+        $lt: rangeEnd,
+      },
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const currentMonthRoutes = routes.filter((route) => {
+      const routeDate = route?.createdAt ? new Date(route.createdAt) : null;
+
+      return routeDate && routeDate >= rangeStart && routeDate < rangeEnd;
+    });
+
+    const drivers = summarizeDriverAnalytics(currentMonthRoutes);
+    const overview = buildAnalyticsOverview(drivers, currentMonthRoutes.length);
+    const monthlyHistory = buildMonthlyAnalyticsHistory(routes, rangeStart);
+
+    res.status(200).json({
+      month: selectedMonth,
+      period: {
+        start: rangeStart,
+        end: rangeEnd,
+        label: buildAnalyticsMonthLabel(rangeStart),
+      },
+      overview,
+      drivers,
+      monthlyHistory,
+      topDriver: drivers[0] || null,
+    });
+  } catch (err) {
+    console.log("Error obteniendo analitica de choferes:", err);
+    res.status(500).json({ message: "Error getting driver performance analytics" });
   }
 };
 
@@ -738,6 +987,7 @@ module.exports = {
   getDriverCurrentRoute,
   listRouteAssignments,
   listRouteDispatchStatuses,
+  getDriverPerformanceAnalytics,
   updateRouteAssignment,
   deleteRouteAssignment,
   updateStopDispatchStatus,
