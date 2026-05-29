@@ -3,6 +3,7 @@ const { register, login, authMiddleware } = require('../controllers/auth.control
 const { makeRoute, getDriverCurrentRoute, listRouteAssignments, listRouteDispatchStatuses, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
+const { createVehicleMaintenance, listRecentVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const router = express.Router();
 
 router.use(express.json());
@@ -64,5 +65,11 @@ router.get('/dailyCheck/placa/:placa', getDailyChecksByPlaca);
 router.get('/dailyCheck/:id', getDailyCheckById);
 router.patch('/internal/admin/dailyCheck/:id', requireAdminDeleteKey, updateDailyCheck);
 router.delete('/internal/admin/dailyCheck/:id', requireAdminDeleteKey, deleteDailyCheck);
+router.post('/vehicle-maintenance', createVehicleMaintenance);
+router.get('/vehicle-maintenance', listRecentVehicleMaintenance);
+router.get('/vehicle-maintenance/placa/:placa', getVehicleMaintenanceByPlaca);
+router.get('/vehicle-maintenance/:id', getVehicleMaintenanceById);
+router.patch('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, updateVehicleMaintenance);
+router.delete('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, deleteVehicleMaintenance);
 
 module.exports = router;
