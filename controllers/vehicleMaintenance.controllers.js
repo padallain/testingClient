@@ -93,6 +93,46 @@ const listRecentVehicleMaintenance = async (req, res) => {
   }
 };
 
+const listUpcomingVehicleMaintenance = async (req, res) => {
+  try {
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 50)
+      : 20;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const records = await VehicleMaintenance.find({
+      fechaProximoServicio: { $ne: null },
+    })
+      .sort({ fechaProximoServicio: 1, placa: 1, createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const upcomingMaintenance = records.map((record) => {
+      const nextDate = new Date(record.fechaProximoServicio);
+      const normalizedNextDate = new Date(nextDate);
+      normalizedNextDate.setHours(0, 0, 0, 0);
+      const diffMs = normalizedNextDate.getTime() - today.getTime();
+      const daysUntilService = Number.isNaN(diffMs) ? null : Math.round(diffMs / 86400000);
+
+      return {
+        ...record,
+        daysUntilService,
+        isOverdue: Number.isFinite(daysUntilService) ? daysUntilService < 0 : false,
+      };
+    });
+
+    return res.status(200).json({
+      total: upcomingMaintenance.length,
+      mantenimientos: upcomingMaintenance,
+    });
+  } catch (error) {
+    console.log("Error obteniendo proximos mantenimientos:", error);
+    return res.status(500).json({ message: "Error obteniendo los proximos mantenimientos" });
+  }
+};
+
 const createVehicleMaintenance = async (req, res) => {
   try {
     const payload = normalizePayload(req.body);
@@ -221,6 +261,7 @@ const deleteVehicleMaintenance = async (req, res) => {
 
 module.exports = {
   listRecentVehicleMaintenance,
+  listUpcomingVehicleMaintenance,
   createVehicleMaintenance,
   getVehicleMaintenanceByPlaca,
   getVehicleMaintenanceById,
