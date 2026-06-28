@@ -1,7 +1,7 @@
 const path = require('path');
 
-const ZONES_ALL = ['SUR', 'CENTRO', 'OESTE', 'NORTE', 'OJEDA', 'MENEGRANDE', 'CABIMAS', 'MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA', 'BACHAQUERO'];
-const ZONES_SOLO_REQUIRED = new Set(['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA', 'BACHAQUERO']);
+const ZONES_ALL = ['SUR', 'CENTRO', 'OESTE', 'NORTE', 'OJEDA', 'MENEGRANDE', 'CABIMAS', 'BACHAQUERO', 'MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA'];
+const ZONES_SOLO_REQUIRED = new Set(['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA']);
 const VAN_COUNT = 3;
 const VAN_CAP = 950;
 const TRUCK_COUNT = 3;
@@ -44,6 +44,10 @@ function buildVehicleAvailability(rawVehiculos) {
   };
 }
 
+function isDedicatedZone(active, zone) {
+  return Boolean(active?.[zone]?.dedicado);
+}
+
 // ─── STEP 1: Build dispatch units respecting combination rules ────────────────
 
 function buildDispatchUnits(active) {
@@ -56,32 +60,46 @@ function buildDispatchUnits(active) {
     }
   }
 
-  // OJEDA group: absorbs CABIMAS and/or MENEGRANDE when OJEDA is active
-  if (active['OJEDA']) {
+  for (const zone of ['SUR', 'CENTRO', 'OESTE', 'NORTE', 'OJEDA', 'CABIMAS', 'MENEGRANDE', 'BACHAQUERO']) {
+    if (active[zone] && isDedicatedZone(active, zone)) {
+      units.push({ zonas: [zone], peso: active[zone].peso, valor: active[zone].valor });
+    }
+  }
+
+  // OJEDA group: absorbs CABIMAS, MENEGRANDE and/or BACHAQUERO when OJEDA is active
+  if (active['OJEDA'] && !isDedicatedZone(active, 'OJEDA')) {
     const group = { zonas: ['OJEDA'], peso: active['OJEDA'].peso, valor: active['OJEDA'].valor };
-    if (active['CABIMAS']) {
+    if (active['CABIMAS'] && !isDedicatedZone(active, 'CABIMAS')) {
       group.zonas.push('CABIMAS');
       group.peso += active['CABIMAS'].peso;
       group.valor += active['CABIMAS'].valor;
     }
-    if (active['MENEGRANDE']) {
+    if (active['MENEGRANDE'] && !isDedicatedZone(active, 'MENEGRANDE')) {
       group.zonas.push('MENEGRANDE');
       group.peso += active['MENEGRANDE'].peso;
       group.valor += active['MENEGRANDE'].valor;
     }
+    if (active['BACHAQUERO'] && !isDedicatedZone(active, 'BACHAQUERO')) {
+      group.zonas.push('BACHAQUERO');
+      group.peso += active['BACHAQUERO'].peso;
+      group.valor += active['BACHAQUERO'].valor;
+    }
     units.push(group);
   } else {
-    // OJEDA inactive → CABIMAS and MENEGRANDE must go alone (no valid partner)
-    if (active['CABIMAS']) {
+    // OJEDA inactive → CABIMAS, MENEGRANDE and BACHAQUERO must go alone (no valid partner)
+    if (active['CABIMAS'] && !isDedicatedZone(active, 'CABIMAS')) {
       units.push({ zonas: ['CABIMAS'], peso: active['CABIMAS'].peso, valor: active['CABIMAS'].valor });
     }
-    if (active['MENEGRANDE']) {
+    if (active['MENEGRANDE'] && !isDedicatedZone(active, 'MENEGRANDE')) {
       units.push({ zonas: ['MENEGRANDE'], peso: active['MENEGRANDE'].peso, valor: active['MENEGRANDE'].valor });
+    }
+    if (active['BACHAQUERO'] && !isDedicatedZone(active, 'BACHAQUERO')) {
+      units.push({ zonas: ['BACHAQUERO'], peso: active['BACHAQUERO'].peso, valor: active['BACHAQUERO'].valor });
     }
   }
 
   // Flexible zones: NORTE, SUR, CENTRO, OESTE
-  const flexActive = ['NORTE', 'SUR', 'CENTRO', 'OESTE'].filter(z => active[z]);
+  const flexActive = ['NORTE', 'SUR', 'CENTRO', 'OESTE'].filter(z => active[z] && !isDedicatedZone(active, z));
   units.push(...buildFlexUnits(flexActive, active));
 
   return units;
@@ -255,8 +273,9 @@ exports.calculateDispatch = (req, res) => {
       if (!ZONES_ALL.includes(zone)) continue;
       const peso  = Number(data.peso)  || 0;
       const valor = Number(data.valor) || 0;
+      const dedicado = Boolean(data.dedicado);
       if (peso > 0 || valor > 0) {
-        active[zone] = { peso, valor };
+        active[zone] = { peso, valor, dedicado };
       }
     }
 
