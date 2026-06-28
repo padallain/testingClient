@@ -1,477 +1,58 @@
 const path = require('path');
+const { calculateOptimalDispatch } = require('../services/optimizador');
 
-const ZONES_ALL = ['SUR', 'CENTRO', 'OESTE', 'NORTE', 'OJEDA', 'MENEGRANDE', 'CABIMAS', 'BACHAQUERO', 'MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA'];
-const ZONES_SOLO_REQUIRED = new Set(['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA']);
-const VAN_COUNT = 3;
-const VAN_CAP = 950;
-const VAN_CLIENT_CAP = 40;
-const TRUCK_COUNT = 3;
-const TRUCK_CAP = 5000;
-const TRUCK_CLIENT_CAP = 30;
-const VAN_RESTRICTED_ZONES = new Set(['MENEGRANDE', 'MACHIQUES', 'MARA']);
-const VAN_LABELS = Array.from({ length: VAN_COUNT }, (_, index) => `Camioneta ${index + 1}`);
-const TRUCK_LABELS = Array.from({ length: TRUCK_COUNT }, (_, index) => `Camión ${index + 1}`);
-const FLEX_PRIORITY_ZONES = ['NORTE', 'SUR', 'CENTRO', 'OESTE'];
-const FLEX_ZONE_SET = new Set(FLEX_PRIORITY_ZONES);
-const FLEX_ALLOWED_PARTNERS = {
-  NORTE: ['CENTRO', 'OESTE'],
-  SUR: ['CENTRO', 'OESTE'],
-  CENTRO: ['NORTE', 'SUR'],
-  OESTE: ['NORTE', 'SUR'],
-};
-
-function normalizeVehicleList(rawList, labels) {
-  if (!Array.isArray(rawList) || rawList.length === 0) {
-    return labels.map((label, index) => ({
-      id: index + 1,
-      nombre: label,
-      disponible: true,
-    }));
-  }
-
-  const byId = new Map(
-    rawList.map((item) => [
-      Number(item?.id),
-      Boolean(item?.disponible),
-    ]),
-  );
-
-  return labels.map((label, index) => ({
-    id: index + 1,
-    nombre: label,
-    disponible: byId.has(index + 1) ? byId.get(index + 1) : true,
+function buildLegacyZones(zonas) {
+  return Object.entries(zonas || {}).map(([nombre, data]) => ({
+    nombre,
+    clientes: Number(data?.clientes) || 0,
+    cajas: Number(data?.cajas) || 0,
+    valor_dolares: Number(data?.valor) || 0,
+    kg: Number(data?.peso) || 0,
   }));
 }
 
-function buildVehicleAvailability(rawVehiculos) {
-  const camionetas = normalizeVehicleList(rawVehiculos?.camionetas, VAN_LABELS);
-  const camiones = normalizeVehicleList(rawVehiculos?.camiones, TRUCK_LABELS);
-
-  return {
-    camionetas,
-    camiones,
-    camionetasDisponibles: camionetas.filter((vehiculo) => vehiculo.disponible),
-    camionesDisponibles: camiones.filter((vehiculo) => vehiculo.disponible),
-  };
-}
-
-function buildUnit(zonas, active) {
-  return zonas.reduce((unit, zone) => ({
-    zonas: [...unit.zonas, zone],
-    peso: unit.peso + (active[zone]?.peso || 0),
-    valor: unit.valor + (active[zone]?.valor || 0),
-    clientes: unit.clientes + (active[zone]?.clientes || 0),
-  }), {
-    zonas: [],
-    peso: 0,
-    valor: 0,
-    clientes: 0,
-  });
-}
-
-function canFitVan(unit) {
-  const hasRestrictedZone = unit.zonas.some((zone) => VAN_RESTRICTED_ZONES.has(zone));
-
-  return !hasRestrictedZone && unit.peso <= VAN_CAP && unit.clientes <= VAN_CLIENT_CAP;
-}
-
-function canFitTruck(unit) {
-  return unit.peso <= TRUCK_CAP && unit.clientes <= TRUCK_CLIENT_CAP;
-}
-
-function canFitExternalTruck(unit) {
-  return unit.peso <= TRUCK_CAP;
-}
-
-function isFlexOnlyUnit(unit) {
-  return unit.zonas.every((zone) => FLEX_ZONE_SET.has(zone));
-}
-
-function isFlexSingleUnit(unit) {
-  return unit.zonas.length === 1 && isFlexOnlyUnit(unit);
-}
-
-function countPriorityZones(unit) {
-  return unit.zonas.filter((zone) => FLEX_ZONE_SET.has(zone)).length;
-}
-
-function unitSignature(unit) {
-  return [...unit.zonas].sort().join('+');
-}
-
-function unitLabel(unit) {
-  return unit.zonas.join(' + ');
-}
-
-function buildFixedDispatchUnits(active) {
-  const units = [];
-
-  for (const zone of ZONES_SOLO_REQUIRED) {
-    if (active[zone]) {
-      units.push(buildUnit([zone], active));
-    }
-  }
-
-  if (active.CABIMAS) {
-    units.push(buildUnit(['CABIMAS'], active));
-  }
-
-  if (active.OJEDA) {
-    const ojedaGroup = ['OJEDA'];
-
-    if (active.MENEGRANDE) {
-      ojedaGroup.push('MENEGRANDE');
-    }
-
-    if (active.BACHAQUERO) {
-      ojedaGroup.push('BACHAQUERO');
-    }
-
-    units.push(buildUnit(ojedaGroup, active));
-  } else {
-    if (active.MENEGRANDE) {
-      units.push(buildUnit(['MENEGRANDE'], active));
-    }
-
-    if (active.BACHAQUERO) {
-      units.push(buildUnit(['BACHAQUERO'], active));
-    }
-  }
-
-  return units;
-}
-
-function buildFlexUnitOptions(active) {
-  const flexActive = FLEX_PRIORITY_ZONES.filter((zone) => active[zone]);
-
-  if (!flexActive.length) {
-    return [[]];
-  }
-
-  const options = [];
-  const seen = new Set();
-
-  function explore(remaining, groups) {
-    if (!remaining.length) {
-      const units = groups.map((zonas) => buildUnit(zonas, active));
-      const signature = units.map(unitSignature).sort().join('|');
-
-      if (!seen.has(signature)) {
-        seen.add(signature);
-        options.push(units);
-      }
-
-      return;
-    }
-
-    const [first, ...rest] = remaining;
-
-    explore(rest, [...groups, [first]]);
-
-    for (const partner of rest) {
-      if (!(FLEX_ALLOWED_PARTNERS[first] || []).includes(partner)) {
-        continue;
-      }
-
-      const nextRemaining = rest.filter((zone) => zone !== partner);
-      explore(nextRemaining, [...groups, [first, partner]]);
-    }
-  }
-
-  explore(flexActive, []);
-
-  return options;
-}
-
-function buildDispatchOptions(active) {
-  const fixedUnits = buildFixedDispatchUnits(active);
-  const flexOptions = buildFlexUnitOptions(active);
-
-  return flexOptions.map((flexUnits) => [...fixedUnits, ...flexUnits]);
-}
-
-function compareByValue(a, b) {
-  return b.valor - a.valor || b.peso - a.peso || b.clientes - a.clientes;
-}
-
-function comparePriorityValue(a, b) {
-  return (
-    countPriorityZones(b) - countPriorityZones(a) ||
-    Number(isFlexSingleUnit(b)) - Number(isFlexSingleUnit(a)) ||
-    compareByValue(a, b)
-  );
-}
-
-function compareTruckPriority(a, b) {
-  return (
-    countPriorityZones(b) - countPriorityZones(a) ||
-    b.zonas.length - a.zonas.length ||
-    Number(isFlexOnlyUnit(b)) - Number(isFlexOnlyUnit(a)) ||
-    b.valor - a.valor ||
-    b.peso - a.peso ||
-    b.clientes - a.clientes
-  );
-}
-
-function buildAssignmentReason(unit, tipo, externalCost, netValue) {
-  if (tipo === 'camioneta') {
-    if (isFlexSingleUnit(unit)) {
-      return 'Camioneta priorizada para zona flexible.';
-    }
-
-    return 'Unidad compatible con camioneta propia.';
-  }
-
-  if (tipo === 'camion') {
-    if (unit.zonas.length > 1 && isFlexOnlyUnit(unit)) {
-      return 'Camión propio agrupando zonas para cubrir más rutas sin dejarlas pendientes.';
-    }
-
-    if (unit.zonas.some((zone) => VAN_RESTRICTED_ZONES.has(zone))) {
-      return 'Zona restringida para camioneta; requiere camión.';
-    }
-
-    return 'Camión propio asignado por capacidad o para liberar camionetas en zonas prioritarias.';
-  }
-
-  if (tipo === 'externo') {
-    if (externalCost > 0 && netValue < 0) {
-      return 'Camión externo recomendado para cubrir la zona, aunque el margen queda negativo.';
-    }
-
-    if (externalCost > 0) {
-      return 'Camión externo recomendado para atender la ruta sin dejarla pendiente.';
-    }
-
-    return 'Camión externo recomendado para cubrir la ruta; configura el costo para calcular el margen.';
-  }
-
-  return 'No hay capacidad propia suficiente y la unidad excede la capacidad asumida de camión externo.';
-}
-
-function buildRecommendations(assignments) {
-  const notes = [];
-  const vans = assignments.filter((assignment) => assignment.tipo === 'camioneta' && isFlexSingleUnit(assignment));
-  const groupedTrucks = assignments.filter((assignment) => assignment.tipo === 'camion' && assignment.zonas.length > 1 && isFlexOnlyUnit(assignment));
-  const externals = assignments.filter((assignment) => assignment.tipo === 'externo');
-  const postponed = assignments.filter((assignment) => assignment.tipo === 'posponer');
-
-  if (vans.length) {
-    notes.push(`Se priorizaron camionetas propias para ${vans.map((assignment) => assignment.zonas[0]).join(', ')}.`);
-  }
-
-  const priorityServed = assignments
-    .filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo')
-    .flatMap((assignment) => assignment.zonas)
-    .filter((zone) => FLEX_ZONE_SET.has(zone));
-
-  if (priorityServed.length) {
-    notes.unshift(`Las primeras zonas atendidas fueron las prioritarias: ${priorityServed.join(', ')}.`);
-  }
-
-  if (groupedTrucks.length) {
-    notes.push(`Conviene agrupar en camión propio: ${groupedTrucks.map((assignment) => unitLabel(assignment)).join('; ')}.`);
-  }
-
-  if (externals.length) {
-    notes.push(`Usar camión externo para ${externals.map((assignment) => unitLabel(assignment)).join('; ')} para no dejar zonas sin atender.`);
-  }
-
-  if (postponed.length) {
-    notes.push(`Quedan pospuestas: ${postponed.map((assignment) => unitLabel(assignment)).join('; ')}.`);
-  }
-
-  return notes;
-}
-
-function assignToVehicles(units, externalCost, vehicleAvailability) {
-  const availableVans = [...vehicleAvailability.camionetasDisponibles];
-  const availableTrucks = [...vehicleAvailability.camionesDisponibles];
-  const assignments = [];
-  const assignedSignatures = new Set();
-
-  function markAssigned(unit, payload) {
-    assignments.push(payload);
-    assignedSignatures.add(unitSignature(unit));
-  }
-
-  function isUnassigned(unit) {
-    return !assignedSignatures.has(unitSignature(unit));
-  }
-
-  const preferredVanUnits = units
-    .filter((unit) => isFlexSingleUnit(unit) && canFitVan(unit))
-    .sort(comparePriorityValue);
-
-  for (const unit of preferredVanUnits) {
-    if (availableVans.length === 0) {
-      break;
-    }
-
-    const nextVan = availableVans.shift();
-    markAssigned(unit, {
-      ...unit,
-      vehiculo: nextVan.nombre,
-      tipo: 'camioneta',
-      estado: 'asignado',
-      motivo: buildAssignmentReason(unit, 'camioneta', externalCost, unit.valor - externalCost),
-    });
-  }
-
-  const otherVanUnits = units
-    .filter((unit) => isUnassigned(unit) && canFitVan(unit))
-    .sort(comparePriorityValue);
-
-  for (const unit of otherVanUnits) {
-    if (availableVans.length === 0) {
-      break;
-    }
-
-    const nextVan = availableVans.shift();
-    markAssigned(unit, {
-      ...unit,
-      vehiculo: nextVan.nombre,
-      tipo: 'camioneta',
-      estado: 'asignado',
-      motivo: buildAssignmentReason(unit, 'camioneta', externalCost, unit.valor - externalCost),
-    });
-  }
-
-  const truckCandidates = units
-    .filter((unit) => isUnassigned(unit) && canFitTruck(unit))
-    .sort(compareTruckPriority);
-
-  for (const unit of truckCandidates) {
-    if (availableTrucks.length === 0) {
-      break;
-    }
-
-    const nextTruck = availableTrucks.shift();
-    markAssigned(unit, {
-      ...unit,
-      vehiculo: nextTruck.nombre,
-      tipo: 'camion',
-      estado: 'asignado',
-      motivo: buildAssignmentReason(unit, 'camion', externalCost, unit.valor - externalCost),
-    });
-  }
-
-  const overflow = units
-    .filter((unit) => isUnassigned(unit))
-    .sort(compareTruckPriority);
-
-  for (const unit of overflow) {
-    const netValue = unit.valor - externalCost;
-
-    if (canFitExternalTruck(unit)) {
-      markAssigned(unit, {
-        ...unit,
-        vehiculo: 'Vehículo Externo',
-        tipo: 'externo',
-        estado: 'externo',
-        costoExterno: externalCost,
-        gananciaNeta: netValue,
-        motivo: buildAssignmentReason(unit, 'externo', externalCost, netValue),
-      });
-      continue;
-    }
-
-    markAssigned(unit, {
-      ...unit,
-      vehiculo: null,
-      tipo: 'posponer',
-      estado: 'posponer',
-      costoExterno: externalCost,
-      gananciaNeta: netValue,
-      motivo: buildAssignmentReason(unit, 'posponer', externalCost, netValue),
-    });
-  }
-
-  const dispatched = assignments.filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo');
-  const postponed = assignments.filter((assignment) => assignment.estado === 'posponer');
-
-  return {
-    asignaciones: assignments,
-    recomendaciones: buildRecommendations(assignments),
-    estrategia: {
-      flexAgrupaciones: units
-        .filter((unit) => isFlexOnlyUnit(unit))
-        .map((unit) => [...unit.zonas]),
-      criterio: 'NORTE, OESTE, SUR y CENTRO se atienden antes que cualquier otra zona; luego se completa el resto con flota propia o externa.',
-    },
-    resumen: {
-      camionetasConfiguradas: vehicleAvailability.camionetas.length,
-      camionetasHabilitadas: vehicleAvailability.camionetasDisponibles.length,
-      camionetasUsadas: vehicleAvailability.camionetasDisponibles.length - availableVans.length,
-      camionetasSinUsar: availableVans.length,
-      camionesConfigurados: vehicleAvailability.camiones.length,
-      camionesHabilitados: vehicleAvailability.camionesDisponibles.length,
-      camionesUsados: vehicleAvailability.camionesDisponibles.length - availableTrucks.length,
-      camionesSinUsar: availableTrucks.length,
-      externosRequeridos: assignments.filter((assignment) => assignment.estado === 'externo').length,
-      rutasPospuestas: postponed.length,
-      totalValorDespachado: dispatched.reduce((sum, assignment) => sum + assignment.valor, 0),
-      totalValorPospuesto: postponed.reduce((sum, assignment) => sum + assignment.valor, 0),
-      totalClientesDespachados: dispatched.reduce((sum, assignment) => sum + (assignment.clientes || 0), 0),
-      totalClientesPospuestos: postponed.reduce((sum, assignment) => sum + (assignment.clientes || 0), 0),
-    },
-    disponibilidadVehiculos: {
-      camionetas: vehicleAvailability.camionetas,
-      camiones: vehicleAvailability.camiones,
-    },
-  };
-}
-
-function scoreDispatchResult(result) {
-  const priorityServedZones = result.asignaciones
-    .filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo')
-    .reduce((sum, assignment) => sum + countPriorityZones(assignment), 0);
-  const priorityPostponedZones = result.asignaciones
-    .filter((assignment) => assignment.estado === 'posponer')
-    .reduce((sum, assignment) => sum + countPriorityZones(assignment), 0);
-  const servedZones = result.asignaciones
-    .filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo')
-    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
-  const externalZones = result.asignaciones
-    .filter((assignment) => assignment.estado === 'externo')
-    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
-  const postponedZones = result.asignaciones
-    .filter((assignment) => assignment.estado === 'posponer')
-    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
-  const preferredVanZones = result.asignaciones
-    .filter((assignment) => assignment.tipo === 'camioneta' && isFlexSingleUnit(assignment))
-    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
-  const ownFleetZones = result.asignaciones
-    .filter((assignment) => assignment.estado === 'asignado')
-    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
-
-  return (
-    priorityServedZones * 10000000 -
-    priorityPostponedZones * 100000000 -
-    servedZones * 100000 -
-    postponedZones * 1000000 -
-    externalZones * 1000 +
-    preferredVanZones * 100 +
-    ownFleetZones * 10 +
-    result.resumen.totalValorDespachado / 100
-  );
-}
-
-function chooseBestDispatchResult(options, externalCost, vehicleAvailability) {
-  let bestResult = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (const units of options) {
-    const result = assignToVehicles(units, externalCost, vehicleAvailability);
-    const score = scoreDispatchResult(result);
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestResult = result;
-    }
-  }
-
-  return bestResult;
+function buildLegacyAssignments(result, externalCost) {
+  const assigned = result.plan.map((item) => ({
+    vehiculo: item.nombre_vehiculo,
+    tipo: item.tipo,
+    zonas: item.zonas,
+    peso: item.kg_total,
+    valor: item.valor_total_dolares,
+    clientes: item.clientes_total,
+    cajas: item.cajas_total,
+    estado: 'asignado',
+    motivo: item.motivo,
+  }));
+
+  const external = result.zonas_externo.map((item) => ({
+    vehiculo: 'Vehículo Externo',
+    tipo: 'externo',
+    zonas: item.zonas,
+    peso: item.kg_total,
+    valor: item.valor_dolares,
+    clientes: item.clientes_total,
+    cajas: item.cajas_total,
+    estado: 'externo',
+    costoExterno: externalCost,
+    gananciaNeta: item.ganancia_neta_si_externo,
+    motivo: item.razon,
+  }));
+
+  const tomorrow = result.zonas_mañana.map((item) => ({
+    vehiculo: null,
+    tipo: 'posponer',
+    zonas: item.zonas,
+    peso: item.kg_total,
+    valor: item.valor_dolares,
+    clientes: item.clientes_total,
+    cajas: item.cajas_total,
+    estado: 'posponer',
+    costoExterno: externalCost,
+    gananciaNeta: item.valor_dolares - externalCost,
+    motivo: item.razon,
+  }));
+
+  return [...assigned, ...external, ...tomorrow];
 }
 
 exports.getDispatchPage = (req, res) => {
@@ -480,43 +61,61 @@ exports.getDispatchPage = (req, res) => {
 
 exports.calculateDispatch = (req, res) => {
   try {
-    const { zonas, costoExterno, vehiculos } = req.body;
+    const { zonas, costoExterno, vehiculos } = req.body || {};
 
     if (!zonas || typeof zonas !== 'object') {
       return res.status(400).json({ error: 'Se requiere el objeto "zonas"' });
     }
 
     const externalCost = Number(costoExterno) || 0;
+    const normalizedZones = buildLegacyZones(zonas).filter((zone) => zone.kg > 0 || zone.valor_dolares > 0 || zone.clientes > 0 || zone.cajas > 0);
 
-    const active = {};
-    for (const [zone, data] of Object.entries(zonas)) {
-      if (!ZONES_ALL.includes(zone)) continue;
-      const peso = Number(data.peso) || 0;
-      const valor = Number(data.valor) || 0;
-      const clientes = Number(data.clientes) || 0;
-
-      if (peso > 0 || valor > 0 || clientes > 0) {
-        active[zone] = { peso, valor, clientes };
-      }
-    }
-
-    if (Object.keys(active).length === 0) {
+    if (!normalizedZones.length) {
       return res.status(400).json({ error: 'No hay zonas activas con datos' });
     }
 
-    const vehicleAvailability = buildVehicleAvailability(vehiculos);
-    const dispatchOptions = buildDispatchOptions(active);
-    const result = chooseBestDispatchResult(dispatchOptions, externalCost, vehicleAvailability);
+    const result = calculateOptimalDispatch({
+      zonas: normalizedZones,
+      costoExternoReferencia: externalCost,
+      vehiculos,
+    });
+
+    const asignaciones = buildLegacyAssignments(result, externalCost);
 
     res.json({
       success: true,
-      fecha: new Date().toISOString(),
+      fecha: result.fecha,
       costoExterno: externalCost,
-      zonasActivas: Object.keys(active),
-      ...result,
+      zonasActivas: normalizedZones.map((zone) => zone.nombre),
+      asignaciones,
+      recomendaciones: result.recomendaciones,
+      estrategia: result.estrategia,
+      resumen: {
+        camionetasConfiguradas: result.resumen.camionetas_configuradas,
+        camionetasHabilitadas: result.resumen.camionetas_habilitadas,
+        camionetasUsadas: result.resumen.camionetas_usadas,
+        camionetasSinUsar: result.resumen.camionetas_habilitadas - result.resumen.camionetas_usadas,
+        camionesConfigurados: result.resumen.camiones_configurados,
+        camionesHabilitados: result.resumen.camiones_habilitados,
+        camionesUsados: result.resumen.camiones_usados,
+        camionesSinUsar: result.resumen.camiones_habilitados - result.resumen.camiones_usados,
+        externosRequeridos: result.zonas_externo.length,
+        rutasPospuestas: result.zonas_mañana.length,
+        totalValorDespachado: result.resumen.valor_despachado_hoy,
+        totalValorPospuesto: result.resumen.valor_pendiente,
+        totalClientesDespachados: result.resumen.clientes_despachados,
+        totalClientesPospuestos: result.resumen.clientes_pendientes,
+      },
+      disponibilidadVehiculos: {
+        camionetas: result.disponibilidad_vehiculos.camionetas,
+        camiones: result.disponibilidad_vehiculos.camiones,
+      },
+      plan: result.plan,
+      zonas_externo: result.zonas_externo,
+      zonas_mañana: result.zonas_mañana,
     });
   } catch (error) {
     console.error('Error en calculateDispatch:', error);
-    res.status(500).json({ error: 'Error calculando el despacho' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Error calculando el despacho' });
   }
 };

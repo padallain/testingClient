@@ -5,6 +5,8 @@ const { registerClient, countClients, getClient, deleteClient, createClientLocat
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const { getDispatchPage, calculateDispatch } = require('../controllers/dispatch.controllers');
+const { getDespachoPage } = require('../controllers/despacho.controllers');
+const despachoRoutes = require('./despacho.routes');
 const router = express.Router();
 
 router.use(express.json());
@@ -77,5 +79,7 @@ router.delete('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, 
 // Despacho logístico
 router.get('/dispatch', getDispatchPage);
 router.post('/dispatch/calculate', calculateDispatch);
+router.get('/despacho', getDespachoPage);
+router.use('/api/despacho', despachoRoutes);
 
 module.exports = router;

@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Despacho Operativo</title>
+  <style>
+    :root {
+      --bg: #f5efe2;
+      --bg-soft: #fbf8f1;
+      --card: rgba(255, 252, 245, 0.92);
+      --ink: #1f2933;
+      --muted: #52606d;
+      --line: rgba(82, 96, 109, 0.18);
+      --accent: #ad343e;
+      --accent-2: #1f7a8c;
+      --ok: #2a9d4b;
+      --warn: #d4a017;
+      --bad: #d1495b;
+      --shadow: 0 20px 60px rgba(64, 46, 24, 0.14);
+      --radius: 22px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(173, 52, 62, 0.12), transparent 30%),
+        radial-gradient(circle at top right, rgba(31, 122, 140, 0.18), transparent 28%),
+        linear-gradient(180deg, #f8f1e3 0%, #f2ecdf 55%, #ede5d6 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      width: min(1380px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, rgba(255, 250, 240, 0.9), rgba(255, 255, 255, 0.68));
+      border: 1px solid rgba(173, 52, 62, 0.1);
+      border-radius: 32px;
+      box-shadow: var(--shadow);
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      right: -80px;
+      top: -80px;
+      background: rgba(31, 122, 140, 0.09);
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 3.25rem);
+      letter-spacing: -0.04em;
+      margin-bottom: 8px;
+    }
+
+    .hero p {
+      max-width: 840px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.12fr 0.88fr;
+      gap: 22px;
+      margin-top: 22px;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px;
+      backdrop-filter: blur(10px);
+    }
+
+    .panel-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(31, 122, 140, 0.1);
+      color: var(--accent-2);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    .stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .field-grid.compact {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    label {
+      display: grid;
+      gap: 8px;
+      font-size: 0.93rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select {
+      width: 100%;
+      border: 1px solid rgba(82, 96, 109, 0.18);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.86);
+      color: var(--ink);
+    }
+
+    input:focus,
+    select:focus {
+      outline: 2px solid rgba(31, 122, 140, 0.18);
+      border-color: var(--accent-2);
+    }
+
+    button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 18px;
+      cursor: pointer;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #7b1e26);
+      color: white;
+      font-weight: 700;
+    }
+
+    .btn-secondary {
+      background: rgba(31, 122, 140, 0.12);
+      color: var(--accent-2);
+      font-weight: 700;
+    }
+
+    .btn-ghost {
+      background: rgba(209, 73, 91, 0.1);
+      color: var(--bad);
+      font-weight: 700;
+    }
+
+    .zone-row {
+      border: 1px solid rgba(82, 96, 109, 0.14);
+      border-radius: 18px;
+      padding: 16px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(249, 246, 239, 0.9));
+      display: grid;
+      gap: 12px;
+    }
+
+    .zone-row-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .zone-row-head strong {
+      font-size: 1rem;
+    }
+
+    .vehicle-groups {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .vehicle-box {
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.8);
+    }
+
+    .vehicle-box h3 {
+      margin-bottom: 12px;
+      font-size: 1rem;
+    }
+
+    .toggle-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .toggle-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid rgba(82, 96, 109, 0.12);
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: rgba(245, 239, 226, 0.55);
+    }
+
+    .toggle-item span small {
+      display: block;
+      color: var(--muted);
+    }
+
+    .toggle-item input[type="checkbox"] {
+      width: 22px;
+      height: 22px;
+      accent-color: var(--accent-2);
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .status {
+      min-height: 24px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .status.error {
+      color: var(--bad);
+    }
+
+    .results-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 16px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(31, 122, 140, 0.12), rgba(255, 255, 255, 0.66));
+      border: 1px solid rgba(31, 122, 140, 0.12);
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin-bottom: 6px;
+    }
+
+    .metric strong {
+      font-size: 1.3rem;
+    }
+
+    .card {
+      border: 1px solid rgba(82, 96, 109, 0.14);
+      border-radius: 20px;
+      padding: 18px;
+      background: rgba(255, 255, 255, 0.86);
+      display: grid;
+      gap: 12px;
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .tag.camioneta {
+      background: rgba(42, 157, 75, 0.12);
+      color: var(--ok);
+    }
+
+    .tag.camion {
+      background: rgba(31, 122, 140, 0.12);
+      color: var(--accent-2);
+    }
+
+    .occupancy {
+      display: grid;
+      gap: 8px;
+    }
+
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(82, 96, 109, 0.12);
+      overflow: hidden;
+    }
+
+    .bar > div {
+      height: 100%;
+      border-radius: inherit;
+    }
+
+    .bar.ok > div {
+      background: linear-gradient(90deg, #1e8f46, #3dbf67);
+    }
+
+    .bar.warn > div {
+      background: linear-gradient(90deg, #c18a06, #e6bd3a);
+    }
+
+    .bar.bad > div {
+      background: linear-gradient(90deg, #bf384b, #df6172);
+    }
+
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .facts strong {
+      color: var(--ink);
+    }
+
+    .section-title {
+      font-size: 1.02rem;
+      margin-bottom: 12px;
+    }
+
+    .bullet-list {
+      display: grid;
+      gap: 8px;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 1080px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .field-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .summary-grid,
+      .vehicle-groups {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .shell {
+        width: min(100% - 20px, 1380px);
+        padding-top: 16px;
+      }
+
+      .hero,
+      .panel {
+        padding: 18px;
+        border-radius: 24px;
+      }
+
+      .field-grid,
+      .field-grid.compact,
+      .facts {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar {
+        flex-direction: column;
+      }
+
+      .toolbar button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="chip">Despacho con reglas operativas + heurística de asignación</div>
+      <h1>Planeador de despacho</h1>
+      <p>
+        Carga cualquier cantidad de zonas, define clientes, cajas, valor y peso. El modelo prioriza NORTE, OESTE, SUR y CENTRO,
+        respeta restricciones de camionetas y camiones, evalúa combinaciones válidas y te muestra qué sale hoy, qué va con externo y qué queda para mañana.
+      </p>
+    </section>
+
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-title">
+          <div>
+            <h2>Entrada operativa</h2>
+            <p>Agrega o quita zonas según la operación del día.</p>
+          </div>
+          <button class="btn-secondary" id="add-zone" type="button">Agregar zona</button>
+        </div>
+
+        <div class="stack">
+          <div id="zone-list" class="stack"></div>
+
+          <div class="field-grid compact">
+            <label>
+              Costo externo de referencia
+              <input id="external-cost" type="number" min="0" step="0.01" value="0" placeholder="0.00">
+            </label>
+            <label>
+              Fecha base
+              <input id="dispatch-date" type="date">
+            </label>
+          </div>
+
+          <div class="vehicle-groups">
+            <div class="vehicle-box">
+              <h3>Camionetas propias</h3>
+              <div class="toggle-list" id="van-list"></div>
+            </div>
+            <div class="vehicle-box">
+              <h3>Camiones propios</h3>
+              <div class="toggle-list" id="truck-list"></div>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <button class="btn-primary" id="calculate" type="button">Calcular despacho</button>
+            <button class="btn-secondary" id="load-last" type="button">Cargar último despacho</button>
+            <button class="btn-ghost" id="reset-form" type="button">Limpiar</button>
+          </div>
+
+          <div class="status" id="status"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <div>
+            <h2>Resultado</h2>
+            <p id="result-subtitle">Aún no hay cálculo.</p>
+          </div>
+          <div class="chip" id="result-chip">Esperando datos</div>
+        </div>
+
+        <div class="results-grid">
+          <div id="summary" class="summary-grid"></div>
+
+          <div id="plan-section" class="hidden">
+            <h3 class="section-title">Vehículos asignados</h3>
+            <div id="plan-list" class="stack"></div>
+          </div>
+
+          <div id="external-section" class="hidden">
+            <h3 class="section-title">Despacho externo</h3>
+            <div id="external-list" class="stack"></div>
+          </div>
+
+          <div id="tomorrow-section" class="hidden">
+            <h3 class="section-title">Para mañana</h3>
+            <div id="tomorrow-list" class="stack"></div>
+          </div>
+
+          <div id="recommendation-section" class="hidden">
+            <h3 class="section-title">Recomendaciones</h3>
+            <ul id="recommendation-list" class="bullet-list"></ul>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <template id="zone-template">
+    <article class="zone-row">
+      <div class="zone-row-head">
+        <strong class="zone-label">Zona</strong>
+        <button class="btn-ghost remove-zone" type="button">Quitar</button>
+      </div>
+      <div class="field-grid">
+        <label>
+          Nombre
+          <input class="zone-name" type="text" placeholder="Ej: NORTE, OJEDA, BACHAQUERO">
+        </label>
+        <label>
+          Clientes
+          <input class="zone-clients" type="number" min="0" step="1" value="0">
+        </label>
+        <label>
+          Cajas
+          <input class="zone-boxes" type="number" min="0" step="1" value="0">
+        </label>
+        <label>
+          Valor USD
+          <input class="zone-value" type="number" min="0" step="0.01" value="0">
+        </label>
+        <label>
+          Kg
+          <input class="zone-kg" type="number" min="0" step="0.01" value="0">
+        </label>
+      </div>
+    </article>
+  </template>
+
+  <script>
+    const defaultVehicles = {
+      camionetas: [
+        { id: 1, nombre: 'Camioneta 1', capacidadKg: 950, capacidadClientes: 40 },
+        { id: 2, nombre: 'Camioneta 2', capacidadKg: 950, capacidadClientes: 40 },
+        { id: 3, nombre: 'Camioneta 3', capacidadKg: 950, capacidadClientes: 40 },
+      ],
+      camiones: [
+        { id: 1, nombre: 'Camión 1', capacidadKg: 5000, capacidadClientes: 30 },
+        { id: 2, nombre: 'Camión 2', capacidadKg: 5000, capacidadClientes: 30 },
+        { id: 3, nombre: 'Camión 3', capacidadKg: 5000, capacidadClientes: 30 },
+      ],
+    };
+
+    const zoneList = document.getElementById('zone-list');
+    const zoneTemplate = document.getElementById('zone-template');
+    const statusNode = document.getElementById('status');
+    const summaryNode = document.getElementById('summary');
+    const planList = document.getElementById('plan-list');
+    const externalList = document.getElementById('external-list');
+    const tomorrowList = document.getElementById('tomorrow-list');
+    const recommendationList = document.getElementById('recommendation-list');
+
+    function setTodayDate() {
+      document.getElementById('dispatch-date').value = new Date().toISOString().slice(0, 10);
+    }
+
+    function createVehicleToggle(containerId, vehicles, type) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = '';
+
+      vehicles.forEach((vehicle) => {
+        const wrapper = document.createElement('label');
+        wrapper.className = 'toggle-item';
+        wrapper.innerHTML = `
+          <span>
+            <strong>${vehicle.nombre}</strong>
+            <small>${vehicle.capacidadKg} kg · ${vehicle.capacidadClientes} clientes</small>
+          </span>
+          <input type="checkbox" data-type="${type}" data-id="${vehicle.id}" checked>
+        `;
+        container.appendChild(wrapper);
+      });
+    }
+
+    function addZoneRow(initialData = {}) {
+      const fragment = zoneTemplate.content.cloneNode(true);
+      const row = fragment.querySelector('.zone-row');
+      row.querySelector('.zone-name').value = initialData.nombre || '';
+      row.querySelector('.zone-clients').value = initialData.clientes || 0;
+      row.querySelector('.zone-boxes').value = initialData.cajas || 0;
+      row.querySelector('.zone-value').value = initialData.valor_dolares || initialData.valor || 0;
+      row.querySelector('.zone-kg').value = initialData.kg || initialData.peso || 0;
+      row.querySelector('.remove-zone').addEventListener('click', () => {
+        row.remove();
+        refreshZoneLabels();
+      });
+      zoneList.appendChild(row);
+      refreshZoneLabels();
+    }
+
+    function refreshZoneLabels() {
+      [...zoneList.querySelectorAll('.zone-row')].forEach((row, index) => {
+        row.querySelector('.zone-label').textContent = `Zona ${index + 1}`;
+      });
+    }
+
+    function collectZones() {
+      return [...zoneList.querySelectorAll('.zone-row')].map((row) => ({
+        nombre: row.querySelector('.zone-name').value.trim(),
+        clientes: Number(row.querySelector('.zone-clients').value) || 0,
+        cajas: Number(row.querySelector('.zone-boxes').value) || 0,
+        valor_dolares: Number(row.querySelector('.zone-value').value) || 0,
+        kg: Number(row.querySelector('.zone-kg').value) || 0,
+      })).filter((zone) => zone.nombre);
+    }
+
+    function collectVehicles() {
+      const build = (type, source) => source.map((vehicle) => ({
+        id: vehicle.id,
+        disponible: document.querySelector(`input[data-type="${type}"][data-id="${vehicle.id}"]`)?.checked ?? true,
+      }));
+
+      return {
+        camionetas: build('camioneta', defaultVehicles.camionetas),
+        camiones: build('camion', defaultVehicles.camiones),
+      };
+    }
+
+    function setStatus(message, isError = false) {
+      statusNode.textContent = message;
+      statusNode.className = isError ? 'status error' : 'status';
+    }
+
+    function occupancyClass(value) {
+      if (value > 70) return 'ok';
+      if (value >= 40) return 'warn';
+      return 'bad';
+    }
+
+    function currency(value) {
+      return new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(value) || 0);
+    }
+
+    function number(value) {
+      return new Intl.NumberFormat('es-VE', { maximumFractionDigits: 2 }).format(Number(value) || 0);
+    }
+
+    function renderSummary(result) {
+      const items = [
+        ['Valor hoy', currency(result?.resumen?.valor_despachado_hoy)],
+        ['Pendiente', currency(result?.resumen?.valor_pendiente)],
+        ['Flota usada', `${result?.resumen?.vehiculos_usados || 0} / ${(result?.resumen?.vehiculos_usados || 0) + (result?.resumen?.vehiculos_libres || 0)}`],
+        ['Clientes hoy', number(result?.resumen?.clientes_despachados)],
+        ['Clientes pendientes', number(result?.resumen?.clientes_pendientes)],
+        ['Combinaciones evaluadas', number(result?.estrategia?.combinaciones_evaluadas)],
+      ];
+
+      summaryNode.innerHTML = items.map(([label, value]) => `
+        <article class="metric">
+          <span>${label}</span>
+          <strong>${value}</strong>
+        </article>
+      `).join('');
+    }
+
+    function renderPlan(plan) {
+      document.getElementById('plan-section').classList.toggle('hidden', plan.length === 0);
+      planList.innerHTML = plan.map((item) => {
+        const occupancy = Number(item.porcentaje_ocupacion) || 0;
+        const tone = occupancyClass(occupancy);
+        return `
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <h3>${item.nombre_vehiculo}</h3>
+                <p>${item.zonas.join(' + ')}</p>
+              </div>
+              <span class="tag ${item.tipo}">${item.tipo}</span>
+            </div>
+            <div class="occupancy">
+              <strong>Ocupación: ${number(occupancy)}%</strong>
+              <div class="bar ${tone}"><div style="width: ${Math.min(100, occupancy)}%"></div></div>
+            </div>
+            <div class="facts">
+              <div>Kg: <strong>${number(item.kg_total)} / ${number(item.capacidad_kg)}</strong></div>
+              <div>Clientes: <strong>${number(item.clientes_total)}</strong></div>
+              <div>Cajas: <strong>${number(item.cajas_total)}</strong></div>
+              <div>Valor: <strong>${currency(item.valor_total_dolares)}</strong></div>
+            </div>
+            <p>${item.motivo}</p>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function renderExternal(externals) {
+      document.getElementById('external-section').classList.toggle('hidden', externals.length === 0);
+      externalList.innerHTML = externals.map((item) => `
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>${item.zona}</h3>
+              <p>Se despacha con vehículo externo</p>
+            </div>
+            <span class="tag camion">externo</span>
+          </div>
+          <div class="facts">
+            <div>Kg: <strong>${number(item.kg_total)}</strong></div>
+            <div>Clientes: <strong>${number(item.clientes_total)}</strong></div>
+            <div>Cajas: <strong>${number(item.cajas_total)}</strong></div>
+            <div>Valor: <strong>${currency(item.valor_dolares)}</strong></div>
+          </div>
+          <p>Ganancia neta estimada si se usa externo: <strong>${currency(item.ganancia_neta_si_externo)}</strong></p>
+        </article>
+      `).join('');
+    }
+
+    function renderTomorrow(items) {
+      document.getElementById('tomorrow-section').classList.toggle('hidden', items.length === 0);
+      tomorrowList.innerHTML = items.map((item) => `
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>${item.zona}</h3>
+              <p>Se difiere para la próxima salida</p>
+            </div>
+            <span class="tag camioneta">mañana</span>
+          </div>
+          <div class="facts">
+            <div>Kg: <strong>${number(item.kg_total)}</strong></div>
+            <div>Clientes: <strong>${number(item.clientes_total)}</strong></div>
+            <div>Cajas: <strong>${number(item.cajas_total)}</strong></div>
+            <div>Valor: <strong>${currency(item.valor_dolares)}</strong></div>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    function renderRecommendations(items) {
+      document.getElementById('recommendation-section').classList.toggle('hidden', items.length === 0);
+      recommendationList.innerHTML = items.map((item) => `<li>${item}</li>`).join('');
+    }
+
+    function renderResult(result, label = 'Resultado cargado') {
+      renderSummary(result);
+      renderPlan(result.plan || []);
+      renderExternal(result.zonas_externo || []);
+      renderTomorrow(result.zonas_mañana || []);
+      renderRecommendations(result.recomendaciones || []);
+      document.getElementById('result-subtitle').textContent = result?.estrategia?.criterio || 'Cálculo completado';
+      document.getElementById('result-chip').textContent = label;
+    }
+
+    async function calculateDispatch() {
+      const zonas = collectZones();
+
+      if (!zonas.length) {
+        setStatus('Agrega al menos una zona válida.', true);
+        return;
+      }
+
+      setStatus('Calculando despacho...');
+
+      try {
+        const response = await fetch('/api/despacho/calcular', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            zonas,
+            costo_externo_referencia: Number(document.getElementById('external-cost').value) || 0,
+            fecha: document.getElementById('dispatch-date').value || undefined,
+            vehiculos: collectVehicles(),
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.error || 'No se pudo calcular el despacho.');
+        }
+
+        renderResult(data, 'Despacho calculado');
+        setStatus('Despacho calculado y guardado correctamente.');
+      } catch (error) {
+        setStatus(error.message || 'Ocurrió un error calculando el despacho.', true);
+      }
+    }
+
+    async function loadLastDispatch() {
+      setStatus('Consultando último despacho...');
+
+      try {
+        const response = await fetch('/api/despacho/ultimo');
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.error || 'No se pudo consultar el último despacho.');
+        }
+
+        zoneList.innerHTML = '';
+        (data.zonas_input || []).forEach((zone) => addZoneRow(zone));
+        document.getElementById('external-cost').value = data.costo_externo_referencia || 0;
+        hydrateVehicleAvailability(data.disponibilidad_vehiculos);
+        renderResult(data, 'Último despacho');
+        setStatus('Último despacho cargado.');
+      } catch (error) {
+        setStatus(error.message || 'No se pudo cargar el último despacho.', true);
+      }
+    }
+
+    function hydrateVehicleAvailability(availability) {
+      if (!availability) {
+        return;
+      }
+
+      ['camionetas', 'camiones'].forEach((groupName) => {
+        (availability[groupName] || []).forEach((vehicle) => {
+          const type = groupName === 'camionetas' ? 'camioneta' : 'camion';
+          const checkbox = document.querySelector(`input[data-type="${type}"][data-id="${vehicle.id}"]`);
+          if (checkbox) {
+            checkbox.checked = Boolean(vehicle.disponible);
+          }
+        });
+      });
+    }
+
+    function resetForm() {
+      zoneList.innerHTML = '';
+      addZoneRow({ nombre: 'NORTE' });
+      addZoneRow({ nombre: 'OESTE' });
+      document.getElementById('external-cost').value = 0;
+      document.querySelectorAll('.toggle-item input[type="checkbox"]').forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+      summaryNode.innerHTML = '';
+      planList.innerHTML = '';
+      externalList.innerHTML = '';
+      tomorrowList.innerHTML = '';
+      recommendationList.innerHTML = '';
+      document.getElementById('plan-section').classList.add('hidden');
+      document.getElementById('external-section').classList.add('hidden');
+      document.getElementById('tomorrow-section').classList.add('hidden');
+      document.getElementById('recommendation-section').classList.add('hidden');
+      document.getElementById('result-subtitle').textContent = 'Aún no hay cálculo.';
+      document.getElementById('result-chip').textContent = 'Esperando datos';
+      setStatus('Formulario reiniciado.');
+    }
+
+    document.getElementById('add-zone').addEventListener('click', () => addZoneRow());
+    document.getElementById('calculate').addEventListener('click', calculateDispatch);
+    document.getElementById('load-last').addEventListener('click', loadLastDispatch);
+    document.getElementById('reset-form').addEventListener('click', resetForm);
+
+    createVehicleToggle('van-list', defaultVehicles.camionetas, 'camioneta');
+    createVehicleToggle('truck-list', defaultVehicles.camiones, 'camion');
+    setTodayDate();
+    resetForm();
+  </script>
+</body>
+</html>
