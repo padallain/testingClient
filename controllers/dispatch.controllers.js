@@ -8,6 +8,7 @@ const VAN_CLIENT_CAP = 40;
 const TRUCK_COUNT = 3;
 const TRUCK_CAP = 5000;
 const TRUCK_CLIENT_CAP = 30;
+const VAN_RESTRICTED_ZONES = new Set(['MENEGRANDE', 'MACHIQUES', 'MARA']);
 const VAN_LABELS = Array.from({ length: VAN_COUNT }, (_, index) => `Camioneta ${index + 1}`);
 const TRUCK_LABELS = Array.from({ length: TRUCK_COUNT }, (_, index) => `Camión ${index + 1}`);
 
@@ -61,7 +62,9 @@ function buildUnit(zonas, active) {
 }
 
 function canFitVan(unit) {
-  return unit.peso <= VAN_CAP && unit.clientes <= VAN_CLIENT_CAP;
+  const hasRestrictedZone = unit.zonas.some((zone) => VAN_RESTRICTED_ZONES.has(zone));
+
+  return !hasRestrictedZone && unit.peso <= VAN_CAP && unit.clientes <= VAN_CLIENT_CAP;
 }
 
 function canFitTruck(unit) {
