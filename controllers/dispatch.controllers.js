@@ -91,6 +91,10 @@ function isFlexSingleUnit(unit) {
   return unit.zonas.length === 1 && isFlexOnlyUnit(unit);
 }
 
+function countPriorityZones(unit) {
+  return unit.zonas.filter((zone) => FLEX_ZONE_SET.has(zone)).length;
+}
+
 function unitSignature(unit) {
   return [...unit.zonas].sort().join('+');
 }
@@ -190,8 +194,17 @@ function compareByValue(a, b) {
   return b.valor - a.valor || b.peso - a.peso || b.clientes - a.clientes;
 }
 
+function comparePriorityValue(a, b) {
+  return (
+    countPriorityZones(b) - countPriorityZones(a) ||
+    Number(isFlexSingleUnit(b)) - Number(isFlexSingleUnit(a)) ||
+    compareByValue(a, b)
+  );
+}
+
 function compareTruckPriority(a, b) {
   return (
+    countPriorityZones(b) - countPriorityZones(a) ||
     b.zonas.length - a.zonas.length ||
     Number(isFlexOnlyUnit(b)) - Number(isFlexOnlyUnit(a)) ||
     b.valor - a.valor ||
@@ -247,6 +260,15 @@ function buildRecommendations(assignments) {
     notes.push(`Se priorizaron camionetas propias para ${vans.map((assignment) => assignment.zonas[0]).join(', ')}.`);
   }
 
+  const priorityServed = assignments
+    .filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo')
+    .flatMap((assignment) => assignment.zonas)
+    .filter((zone) => FLEX_ZONE_SET.has(zone));
+
+  if (priorityServed.length) {
+    notes.unshift(`Las primeras zonas atendidas fueron las prioritarias: ${priorityServed.join(', ')}.`);
+  }
+
   if (groupedTrucks.length) {
     notes.push(`Conviene agrupar en camión propio: ${groupedTrucks.map((assignment) => unitLabel(assignment)).join('; ')}.`);
   }
@@ -279,7 +301,7 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
 
   const preferredVanUnits = units
     .filter((unit) => isFlexSingleUnit(unit) && canFitVan(unit))
-    .sort(compareByValue);
+    .sort(comparePriorityValue);
 
   for (const unit of preferredVanUnits) {
     if (availableVans.length === 0) {
@@ -298,7 +320,7 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
 
   const otherVanUnits = units
     .filter((unit) => isUnassigned(unit) && canFitVan(unit))
-    .sort(compareByValue);
+    .sort(comparePriorityValue);
 
   for (const unit of otherVanUnits) {
     if (availableVans.length === 0) {
@@ -375,7 +397,7 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
       flexAgrupaciones: units
         .filter((unit) => isFlexOnlyUnit(unit))
         .map((unit) => [...unit.zonas]),
-      criterio: 'Prioridad de camionetas en NORTE, SUR, CENTRO y OESTE; camión propio o externo para cubrir la mayor cantidad posible de zonas.',
+      criterio: 'NORTE, OESTE, SUR y CENTRO se atienden antes que cualquier otra zona; luego se completa el resto con flota propia o externa.',
     },
     resumen: {
       camionetasConfiguradas: vehicleAvailability.camionetas.length,
@@ -401,6 +423,12 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
 }
 
 function scoreDispatchResult(result) {
+  const priorityServedZones = result.asignaciones
+    .filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo')
+    .reduce((sum, assignment) => sum + countPriorityZones(assignment), 0);
+  const priorityPostponedZones = result.asignaciones
+    .filter((assignment) => assignment.estado === 'posponer')
+    .reduce((sum, assignment) => sum + countPriorityZones(assignment), 0);
   const servedZones = result.asignaciones
     .filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo')
     .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
@@ -418,6 +446,8 @@ function scoreDispatchResult(result) {
     .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
 
   return (
+    priorityServedZones * 10000000 -
+    priorityPostponedZones * 100000000 -
     servedZones * 100000 -
     postponedZones * 1000000 -
     externalZones * 1000 +
