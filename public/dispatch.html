@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plan de Despacho Logístico</title>
+  <style>
+    :root {
+      --bg:      #0d1117;
+      --card:    #161b22;
+      --border:  #30363d;
+      --text:    #e6edf3;
+      --muted:   #8b949e;
+      --accent:  #58a6ff;
+      --green:   #3fb950;
+      --orange:  #d29922;
+      --red:     #f85149;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .logo { font-size: 1.5rem; font-weight: 900; color: var(--accent); letter-spacing: -1px; }
+    header h1 { font-size: 1.1rem; font-weight: 600; flex: 1; }
+    .badge-io { background: var(--accent); color: #000; font-size: 0.7rem; font-weight: 800; padding: 3px 10px; border-radius: 20px; letter-spacing: 0.05em; }
+    #fechaHeader { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+    /* ── Layout ── */
+    main { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; }
+
+    /* ── Cards ── */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }
+    .card-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
+
+    /* ── Section label ── */
+    .section-label {
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin-bottom: 10px;
+    }
+
+    /* ── Zone table ── */
+    .zone-table { width: 100%; border-collapse: collapse; }
+    .zone-table thead th {
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      color: var(--muted); letter-spacing: 0.05em;
+      padding: 0 12px 8px; text-align: left; border-bottom: 1px solid var(--border);
+    }
+    .zone-table thead th.center { text-align: center; }
+    .zone-table tbody td { padding: 9px 12px; border-bottom: 1px solid rgba(48,54,61,0.5); vertical-align: middle; }
+    .zone-table tbody tr:last-child td { border-bottom: none; }
+    .zone-table tbody tr.inactive td { opacity: 0.4; }
+    .zone-table tbody tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* Zone name pill */
+    .zone-name { font-weight: 700; font-size: 0.88rem; display: flex; align-items: center; gap: 7px; }
+    .zone-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+    .zone-dot.solo { background: var(--orange); }
+
+    /* Number inputs */
+    .input-num {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); font-size: 0.88rem; padding: 7px 10px; width: 130px;
+      transition: border-color 0.15s;
+    }
+    .input-num:focus { outline: none; border-color: var(--accent); }
+    .input-num:disabled { opacity: 0.3; cursor: not-allowed; }
+    .input-num::placeholder { color: var(--muted); font-size: 0.8rem; }
+
+    /* Toggle */
+    .toggle {
+      appearance: none; -webkit-appearance: none;
+      width: 38px; height: 21px; background: var(--border);
+      border-radius: 11px; cursor: pointer; transition: background 0.2s;
+      position: relative; flex-shrink: 0;
+    }
+    .toggle::after {
+      content: ''; position: absolute; top: 2.5px; left: 2.5px;
+      width: 16px; height: 16px; background: white; border-radius: 50%;
+      transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    .toggle:checked { background: var(--accent); }
+    .toggle:checked::after { left: 19.5px; }
+
+    /* Combina hint */
+    .combina-hint { font-size: 0.75rem; color: var(--muted); }
+
+    /* Divider */
+    .divider { height: 1px; background: var(--border); margin: 18px 0; }
+
+    /* Fleet info */
+    .fleet-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+    .fleet-item { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+    .fleet-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
+    .fleet-value { font-size: 1.35rem; font-weight: 800; }
+    .fleet-value.blue  { color: var(--accent); }
+    .fleet-value.green { color: var(--green); }
+
+    /* External cost input */
+    .input-cost {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); font-size: 0.9rem; padding: 8px 12px; width: 100%;
+      margin-top: 6px;
+    }
+    .input-cost:focus { outline: none; border-color: var(--orange); }
+
+    /* Buttons */
+    .btn-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+    .btn-primary {
+      background: var(--accent); color: #000; font-weight: 800; font-size: 0.92rem;
+      border: none; border-radius: 8px; padding: 12px 28px; cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn-primary:hover   { opacity: 0.85; }
+    .btn-primary:active  { transform: scale(0.97); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent; color: var(--muted); font-weight: 600; font-size: 0.88rem;
+      border: 1px solid var(--border); border-radius: 8px; padding: 10px 18px;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+    /* Error */
+    .msg-error {
+      background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.4);
+      border-radius: 8px; padding: 12px 16px; color: var(--red);
+      font-size: 0.88rem; margin-top: 12px; display: none;
+    }
+
+    /* Loading */
+    .loading { color: var(--muted); font-size: 0.88rem; padding: 10px 0; display: none; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .loading { animation: pulse 1.4s infinite; }
+
+    /* ── Results ── */
+    #results { display: none; }
+    .results-header { font-size: 1.05rem; font-weight: 700; margin: 28px 0 16px; display: flex; align-items: center; gap: 8px; }
+
+    /* Summary stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+    .stat-val { font-size: 1.8rem; font-weight: 800; line-height: 1; }
+    .stat-lbl { font-size: 0.72rem; color: var(--muted); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* Assignment list */
+    .assignments { display: flex; flex-direction: column; gap: 10px; }
+    .asgn-card {
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center;
+      gap: 14px; flex-wrap: wrap;
+    }
+    .asgn-card.camioneta { border-left: 3px solid var(--accent); }
+    .asgn-card.camion    { border-left: 3px solid var(--green); }
+    .asgn-card.externo   { border-left: 3px solid var(--orange); background: rgba(210,153,34,0.04); }
+    .asgn-card.posponer  { border-left: 3px solid var(--red);    background: rgba(248,81,73,0.04); }
+
+    .asgn-vehicle { min-width: 130px; }
+    .asgn-vehicle-name { font-weight: 700; font-size: 0.92rem; }
+    .asgn-status {
+      display: inline-block; font-size: 0.68rem; font-weight: 800;
+      padding: 2px 8px; border-radius: 4px; text-transform: uppercase;
+      letter-spacing: 0.05em; margin-top: 4px;
+    }
+    .asgn-status.camioneta { background: rgba(88,166,255,0.15); color: var(--accent); }
+    .asgn-status.camion    { background: rgba(63,185,80,0.15);  color: var(--green); }
+    .asgn-status.externo   { background: rgba(210,153,34,0.15); color: var(--orange); }
+    .asgn-status.posponer  { background: rgba(248,81,73,0.15);  color: var(--red); }
+
+    .asgn-zones { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+    .zone-pill {
+      font-size: 0.78rem; font-weight: 700; padding: 4px 11px;
+      border-radius: 20px; border: 1px solid;
+    }
+    .zone-pill.camioneta { background: rgba(88,166,255,0.1);  border-color: rgba(88,166,255,0.35);  color: var(--accent); }
+    .zone-pill.camion    { background: rgba(63,185,80,0.1);   border-color: rgba(63,185,80,0.35);   color: var(--green); }
+    .zone-pill.externo   { background: rgba(210,153,34,0.1);  border-color: rgba(210,153,34,0.35);  color: var(--orange); }
+    .zone-pill.posponer  { background: rgba(248,81,73,0.1);   border-color: rgba(248,81,73,0.35);   color: var(--red); }
+
+    .asgn-meta { text-align: right; min-width: 110px; }
+    .asgn-peso  { font-size: 0.78rem; color: var(--muted); }
+    .asgn-valor { font-size: 0.95rem; font-weight: 700; }
+    .asgn-extra { font-size: 0.75rem; margin-top: 3px; }
+
+    /* Footer info */
+    .result-footer { font-size: 0.78rem; color: var(--muted); margin-top: 20px; }
+    .result-footer strong { color: var(--text); }
+
+    @media (max-width: 600px) {
+      .asgn-card { flex-direction: column; align-items: flex-start; }
+      .asgn-meta { text-align: left; }
+      .input-num { width: 100px; }
+    }
+
+    @media print {
+      body { background: white; color: black; }
+      header, .btn-row, .card:not(.print-visible) { }
+      .asgn-card { border: 1px solid #ccc !important; background: white !important; }
+      .zone-pill { border: 1px solid #999 !important; background: #eee !important; color: black !important; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⬡</div>
+  <div>
+    <h1>Plan de Despacho Logístico</h1>
+    <div id="fechaHeader"></div>
+  </div>
+  <span class="badge-io">IO v1.0</span>
+</header>
+
+<main>
+
+  <!-- ── ZONA INPUTS ── -->
+  <div class="card">
+    <div class="card-title">📦 Datos de Zonas</div>
+
+    <div class="section-label">Zonas Principales</div>
+    <table class="zone-table">
+      <thead>
+        <tr>
+          <th class="center" style="width:54px;">Activa</th>
+          <th>Zona</th>
+          <th>Peso (kg)</th>
+          <th>Valor ($)</th>
+          <th>Combina con</th>
+        </tr>
+      </thead>
+      <tbody id="tbodyMain"></tbody>
+    </table>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Zonas Independientes <span style="font-size:0.68rem;">(camión dedicado)</span></div>
+    <table class="zone-table">
+      <thead>
+        <tr>
+          <th class="center" style="width:54px;">Activa</th>
+          <th>Zona</th>
+          <th>Peso (kg)</th>
+          <th>Valor ($)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbodySolo"></tbody>
+    </table>
+  </div>
+
+  <!-- ── FLEET CONFIG ── -->
+  <div class="card">
+    <div class="card-title">⚙️ Configuración de Flota</div>
+    <div class="fleet-grid">
+      <div class="fleet-item">
+        <div class="fleet-label">Camionetas disponibles</div>
+        <div class="fleet-value blue">3 × 950 kg</div>
+      </div>
+      <div class="fleet-item">
+        <div class="fleet-label">Camiones disponibles</div>
+        <div class="fleet-value green">3 × 5.000 kg</div>
+      </div>
+      <div class="fleet-item">
+        <div class="fleet-label">Costo vehículo externo ($)</div>
+        <input type="number" id="costoExterno" class="input-cost" placeholder="0 — dejar en 0 si no aplica" min="0" step="500" value="0">
+        <div style="font-size:0.72rem; color:var(--muted); margin-top:5px;">Se usa si la flota propia no alcanza</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ACTIONS ── -->
+  <div class="btn-row">
+    <button class="btn-primary" id="btnCalcular" onclick="calcularDespacho()">⚡ Calcular Plan de Despacho</button>
+    <button class="btn-ghost" onclick="limpiarFormulario()">↺ Limpiar</button>
+    <button class="btn-ghost" onclick="window.print()">🖨 Imprimir</button>
+  </div>
+
+  <div class="msg-error" id="msgError"></div>
+  <div class="loading"   id="loadingMsg">⏳ Calculando plan óptimo...</div>
+
+  <!-- ── RESULTS ── -->
+  <div id="results">
+    <div class="divider" style="margin-top:28px;"></div>
+    <div class="results-header">📊 Plan de Despacho Generado</div>
+
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <div class="section-label" style="margin-bottom:12px;">Asignaciones de Vehículos</div>
+    <div class="assignments" id="assignmentsList"></div>
+
+    <div class="result-footer" id="resultFooter"></div>
+  </div>
+
+</main>
+
+<script>
+// ── Zone definitions ──────────────────────────────────────────────────────────
+const MAIN_ZONES = [
+  { id: 'SUR',        nombre: 'SUR',        combina: 'CENTRO u OESTE' },
+  { id: 'CENTRO',     nombre: 'CENTRO',     combina: 'NORTE o SUR' },
+  { id: 'OESTE',      nombre: 'OESTE',      combina: 'NORTE o SUR' },
+  { id: 'NORTE',      nombre: 'NORTE',      combina: 'CENTRO u OESTE' },
+  { id: 'OJEDA',      nombre: 'OJEDA',      combina: 'CABIMAS, MENEGRANDE' },
+  { id: 'MENEGRANDE', nombre: 'MENEGRANDE', combina: 'Solo con OJEDA' },
+  { id: 'CABIMAS',    nombre: 'CABIMAS',    combina: 'Solo con OJEDA' },
+];
+
+const SOLO_ZONES = [
+  { id: 'MACHIQUES',  nombre: 'MACHIQUES',  combina: '' },
+  { id: 'PUERTOS',    nombre: 'PUERTOS',    combina: '' },
+  { id: 'CONCEPCION', nombre: 'CONCEPCIÓN', combina: '' },
+  { id: 'MARA',       nombre: 'MARA',       combina: '' },
+];
+
+// Map from safe HTML ID → real zone name sent to API
+const ID_TO_NAME = {};
+[...MAIN_ZONES, ...SOLO_ZONES].forEach(z => { ID_TO_NAME[z.id] = z.nombre; });
+
+// ── Build zone input rows ─────────────────────────────────────────────────────
+function buildRows(tbodyId, zones, isSolo) {
+  const tbody = document.getElementById(tbodyId);
+  zones.forEach(z => {
+    const tr = document.createElement('tr');
+    tr.id = `row-${z.id}`;
+    tr.innerHTML = `
+      <td style="text-align:center;">
+        <input type="checkbox" class="toggle" id="tog-${z.id}" checked onchange="onToggle('${z.id}')">
+      </td>
+      <td>
+        <span class="zone-name">
+          <span class="zone-dot ${isSolo ? 'solo' : ''}"></span>
+          ${z.nombre}
+        </span>
+      </td>
+      <td>
+        <input type="number" class="input-num" id="peso-${z.id}"
+               placeholder="0 kg" min="0" step="1"
+               oninput="onZoneInput('${z.id}')">
+      </td>
+      <td>
+        <input type="number" class="input-num" id="valor-${z.id}"
+               placeholder="$0" min="0" step="100"
+               oninput="onZoneInput('${z.id}')">
+      </td>
+      <td class="combina-hint">${z.combina}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function onToggle(id) {
+  const checked = document.getElementById(`tog-${id}`).checked;
+  document.getElementById(`peso-${id}`).disabled  = !checked;
+  document.getElementById(`valor-${id}`).disabled = !checked;
+  if (!checked) {
+    document.getElementById(`peso-${id}`).value  = '';
+    document.getElementById(`valor-${id}`).value = '';
+  }
+  document.getElementById(`row-${id}`).classList.toggle('inactive', !checked);
+}
+
+function onZoneInput(id) {
+  const peso  = Number(document.getElementById(`peso-${id}`).value);
+  const valor = Number(document.getElementById(`valor-${id}`).value);
+  if (peso > 0 || valor > 0) {
+    document.getElementById(`tog-${id}`).checked = true;
+    document.getElementById(`row-${id}`).classList.remove('inactive');
+    document.getElementById(`peso-${id}`).disabled  = false;
+    document.getElementById(`valor-${id}`).disabled = false;
+  }
+}
+
+function limpiarFormulario() {
+  [...MAIN_ZONES, ...SOLO_ZONES].forEach(z => {
+    document.getElementById(`peso-${z.id}`).value   = '';
+    document.getElementById(`valor-${z.id}`).value  = '';
+    document.getElementById(`peso-${z.id}`).disabled  = false;
+    document.getElementById(`valor-${z.id}`).disabled = false;
+    document.getElementById(`tog-${z.id}`).checked  = true;
+    document.getElementById(`row-${z.id}`).classList.remove('inactive');
+  });
+  document.getElementById('costoExterno').value = '0';
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('msgError').style.display = 'none';
+}
+
+// ── API call ──────────────────────────────────────────────────────────────────
+async function calcularDespacho() {
+  const errEl     = document.getElementById('msgError');
+  const loadEl    = document.getElementById('loadingMsg');
+  const resultsEl = document.getElementById('results');
+  const btnEl     = document.getElementById('btnCalcular');
+
+  errEl.style.display     = 'none';
+  resultsEl.style.display = 'none';
+  loadEl.style.display    = 'block';
+  btnEl.disabled = true;
+
+  // Build payload
+  const zonas = {};
+  [...MAIN_ZONES, ...SOLO_ZONES].forEach(z => {
+    if (!document.getElementById(`tog-${z.id}`).checked) return;
+    const peso  = Number(document.getElementById(`peso-${z.id}`).value)  || 0;
+    const valor = Number(document.getElementById(`valor-${z.id}`).value) || 0;
+    if (peso > 0 || valor > 0) {
+      zonas[z.nombre] = { peso, valor };
+    }
+  });
+
+  const costoExterno = Number(document.getElementById('costoExterno').value) || 0;
+
+  try {
+    const res  = await fetch('/dispatch/calculate', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ zonas, costoExterno }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+    renderResults(data);
+    resultsEl.style.display = 'block';
+    resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) {
+    errEl.textContent   = '⚠ ' + err.message;
+    errEl.style.display = 'block';
+  } finally {
+    loadEl.style.display = 'none';
+    btnEl.disabled = false;
+  }
+}
+
+// ── Render results ────────────────────────────────────────────────────────────
+const fmt = {
+  peso:  kg => kg.toLocaleString('es-VE') + ' kg',
+  valor: v  => '$' + v.toLocaleString('es-VE', { minimumFractionDigits: 0 }),
+};
+
+const TIPO_ICON = { camioneta: '🚐', camion: '🚛', externo: '🔄', posponer: '⏸' };
+const TIPO_LABEL = { camioneta: 'Camioneta', camion: 'Camión', externo: 'Externo', posponer: 'Posponer' };
+
+function renderResults(data) {
+  const { asignaciones, resumen } = data;
+
+  // ── Stats ──
+  const statsGrid = document.getElementById('statsGrid');
+  statsGrid.innerHTML = `
+    <div class="stat-card">
+      <div class="stat-val" style="color:var(--accent);">${resumen.camionetasUsadas}/3</div>
+      <div class="stat-lbl">Camionetas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" style="color:var(--green);">${resumen.camionesUsados}/3</div>
+      <div class="stat-lbl">Camiones</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" style="color:var(--orange);">${resumen.externosRequeridos}</div>
+      <div class="stat-lbl">Externos</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" style="color:var(--red);">${resumen.rutasPospuestas}</div>
+      <div class="stat-lbl">Pospuestas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val" style="color:var(--green); font-size:1.35rem;">${fmt.valor(resumen.totalValorDespachado)}</div>
+      <div class="stat-lbl">Valor despachado</div>
+    </div>
+    ${resumen.totalValorPospuesto > 0 ? `
+    <div class="stat-card">
+      <div class="stat-val" style="color:var(--red); font-size:1.35rem;">${fmt.valor(resumen.totalValorPospuesto)}</div>
+      <div class="stat-lbl">Valor pospuesto</div>
+    </div>` : ''}
+  `;
+
+  // ── Assignment cards ──
+  const list = document.getElementById('assignmentsList');
+  list.innerHTML = '';
+
+  asignaciones.forEach(a => {
+    const card = document.createElement('div');
+    card.className = `asgn-card ${a.tipo}`;
+
+    let extraHtml = '';
+    if (a.tipo === 'externo') {
+      extraHtml = `<div class="asgn-extra" style="color:var(--orange);">Ganancia neta: ${fmt.valor(a.gananciaNeta)}</div>`;
+    } else if (a.tipo === 'posponer') {
+      const msg = a.costoExterno > 0
+        ? `Valor (${fmt.valor(a.valor)}) ≤ costo ext. (${fmt.valor(a.costoExterno)})`
+        : 'Flota propia excedida — sin ext. configurado';
+      extraHtml = `<div class="asgn-extra" style="color:var(--red);">${msg}</div>`;
+    }
+
+    card.innerHTML = `
+      <div class="asgn-vehicle">
+        <div class="asgn-vehicle-name">${TIPO_ICON[a.tipo]} ${a.vehiculo || 'Sin asignar'}</div>
+        <span class="asgn-status ${a.tipo}">${TIPO_LABEL[a.tipo]}</span>
+        ${extraHtml}
+      </div>
+      <div class="asgn-zones">
+        ${a.zonas.map(z => `<span class="zone-pill ${a.tipo}">${z}</span>`).join('')}
+      </div>
+      <div class="asgn-meta">
+        <div class="asgn-peso">${fmt.peso(a.peso)}</div>
+        <div class="asgn-valor">${fmt.valor(a.valor)}</div>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  // ── Footer ──
+  const fechaStr = new Date(data.fecha).toLocaleString('es-VE');
+  document.getElementById('resultFooter').innerHTML =
+    `Generado: <strong>${fechaStr}</strong> &nbsp;·&nbsp; Zonas activas: <strong>${data.zonasActivas.join(', ')}</strong>`;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('fechaHeader').textContent = new Date().toLocaleDateString('es-VE', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  buildRows('tbodyMain', MAIN_ZONES, false);
+  buildRows('tbodySolo', SOLO_ZONES, true);
+});
+</script>
+</body>
+</html>

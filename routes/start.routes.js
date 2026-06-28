@@ -4,6 +4,7 @@ const { makeRoute, getDriverCurrentRoute, listRouteAssignments, listRouteDispatc
 const { registerClient, countClients, getClient, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
+const { getDispatchPage, calculateDispatch } = require('../controllers/dispatch.controllers');
 const router = express.Router();
 
 router.use(express.json());
@@ -72,5 +73,9 @@ router.get('/vehicle-maintenance/placa/:placa', getVehicleMaintenanceByPlaca);
 router.get('/vehicle-maintenance/:id', getVehicleMaintenanceById);
 router.patch('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, updateVehicleMaintenance);
 router.delete('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, deleteVehicleMaintenance);
+
+// Despacho logístico
+router.get('/dispatch', getDispatchPage);
+router.post('/dispatch/calculate', calculateDispatch);
 
 module.exports = router;

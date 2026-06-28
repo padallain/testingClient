@@ -64,7 +64,7 @@ const mergeStopProgress = (stops, progressSourceStops) => {
   });
 };
 
-const buildRecommendedStopsFromAssignment = (assignment) => {
+const buildRecommendedStopsFromAssignment = async (assignment) => {
   const currentStops = Array.isArray(assignment?.stops)
     ? assignment.stops.map((stop) => (stop.toObject ? stop.toObject() : stop))
     : [];
@@ -73,7 +73,7 @@ const buildRecommendedStopsFromAssignment = (assignment) => {
     return [];
   }
 
-  const optimizedRoute = buildOptimizedRoute(currentStops.map((stop) => ({
+  const optimizedRoute = await buildOptimizedRoute(currentStops.map((stop) => ({
     id: stop.clientId,
     nombre: stop.nombre,
     weight: stop.weight,
@@ -102,10 +102,10 @@ const buildRecommendedStopsFromAssignment = (assignment) => {
   });
 };
 
-const applyRouteArtifactsToAssignment = (assignment, stops) => {
+const applyRouteArtifactsToAssignment = async (assignment, stops) => {
   const normalizedStops = mapStopsForArtifacts(stops);
   const { googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(normalizedStops);
-  const totalDistanceKm = calculateRouteDistance(normalizedStops);
+  const totalDistanceKm = await calculateRouteDistance(normalizedStops);
 
   assignment.stops = stops.map((stop, index) => ({
     ...stop,
@@ -344,7 +344,7 @@ const makeRoute = async (req, res) => {
 
     const foundIds = clients.map((client) => client.id);
     const { notFoundIds, notFoundClients } = buildMissingClients(uniqueIds, foundIds);
-    const routeOptions = buildRouteOptions(clients);
+    const routeOptions = await buildRouteOptions(clients);
 
     if (routeOptions.length < 1) {
       return res
@@ -357,7 +357,7 @@ const makeRoute = async (req, res) => {
     }
 
     const normalizedRouteType = String(routeType || "").trim().toLowerCase();
-    const recommendedRouteOption = routeOptions.find((option) => option.type === "closest") || routeOptions[0];
+    const recommendedRouteOption = routeOptions[0];
     const selectedRouteOption = routeOptions.find((option) => option.type === normalizedRouteType) || recommendedRouteOption;
     const { response, googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(selectedRouteOption.route);
     const responseRouteOptions = routeOptions.map((option) => {
@@ -704,7 +704,7 @@ const customizeDriverRoute = async (req, res) => {
       return res.status(400).json({ message: "The customized route must include all assigned stops" });
     }
 
-    applyRouteArtifactsToAssignment(assignment, nextStops);
+    await applyRouteArtifactsToAssignment(assignment, nextStops);
     assignment.wasDriverModified = true;
     assignment.driverModifiedAt = new Date();
     assignment.status = calculateRouteStatus(assignment);
@@ -739,7 +739,7 @@ const resetDriverRoute = async (req, res) => {
       : [];
 
     if (originalStops.length === 0) {
-      originalStops = buildRecommendedStopsFromAssignment(assignment);
+      originalStops = await buildRecommendedStopsFromAssignment(assignment);
 
       if (originalStops.length === 0) {
         return res.status(400).json({ message: "This route does not have a recommended version to restore" });
@@ -748,11 +748,11 @@ const resetDriverRoute = async (req, res) => {
       assignment.originalStops = originalStops;
       assignment.originalGoogleMapsRouteLinks = [];
       assignment.originalOpenRouteLink = "";
-      assignment.originalTotalDistanceKm = calculateRouteDistance(mapStopsForArtifacts(originalStops));
+      assignment.originalTotalDistanceKm = await calculateRouteDistance(mapStopsForArtifacts(originalStops));
     }
 
     const restoredStops = mergeStopProgress(originalStops, assignment.stops);
-    applyRouteArtifactsToAssignment(assignment, restoredStops);
+    await applyRouteArtifactsToAssignment(assignment, restoredStops);
     assignment.originalGoogleMapsRouteLinks = assignment.googleMapsRouteLinks;
     assignment.originalOpenRouteLink = assignment.openRouteLink;
     assignment.originalTotalDistanceKm = assignment.totalDistanceKm;
