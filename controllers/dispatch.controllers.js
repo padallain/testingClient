@@ -4,8 +4,10 @@ const ZONES_ALL = ['SUR', 'CENTRO', 'OESTE', 'NORTE', 'OJEDA', 'MENEGRANDE', 'CA
 const ZONES_SOLO_REQUIRED = new Set(['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA']);
 const VAN_COUNT = 3;
 const VAN_CAP = 950;
+const VAN_CLIENT_CAP = 40;
 const TRUCK_COUNT = 3;
 const TRUCK_CAP = 5000;
+const TRUCK_CLIENT_CAP = 30;
 const VAN_LABELS = Array.from({ length: VAN_COUNT }, (_, index) => `Camioneta ${index + 1}`);
 const TRUCK_LABELS = Array.from({ length: TRUCK_COUNT }, (_, index) => `Camión ${index + 1}`);
 
@@ -44,8 +46,30 @@ function buildVehicleAvailability(rawVehiculos) {
   };
 }
 
-function isDedicatedZone(active, zone) {
-  return Boolean(active?.[zone]?.dedicado);
+function buildUnit(zonas, active) {
+  return zonas.reduce((unit, zone) => ({
+    zonas: [...unit.zonas, zone],
+    peso: unit.peso + (active[zone]?.peso || 0),
+    valor: unit.valor + (active[zone]?.valor || 0),
+    clientes: unit.clientes + (active[zone]?.clientes || 0),
+  }), {
+    zonas: [],
+    peso: 0,
+    valor: 0,
+    clientes: 0,
+  });
+}
+
+function canFitVan(unit) {
+  return unit.peso <= VAN_CAP && unit.clientes <= VAN_CLIENT_CAP;
+}
+
+function canFitTruck(unit) {
+  return unit.peso <= TRUCK_CAP && unit.clientes <= TRUCK_CLIENT_CAP;
+}
+
+function canFitOwnFleet(unit) {
+  return canFitVan(unit) || canFitTruck(unit);
 }
 
 // ─── STEP 1: Build dispatch units respecting combination rules ────────────────
@@ -56,50 +80,40 @@ function buildDispatchUnits(active) {
   // Mandatory solo zones (each always gets its own vehicle)
   for (const zone of ZONES_SOLO_REQUIRED) {
     if (active[zone]) {
-      units.push({ zonas: [zone], peso: active[zone].peso, valor: active[zone].valor });
+      units.push(buildUnit([zone], active));
     }
   }
 
-  for (const zone of ['SUR', 'CENTRO', 'OESTE', 'NORTE', 'OJEDA', 'CABIMAS', 'MENEGRANDE', 'BACHAQUERO']) {
-    if (active[zone] && isDedicatedZone(active, zone)) {
-      units.push({ zonas: [zone], peso: active[zone].peso, valor: active[zone].valor });
-    }
+  // CABIMAS always goes alone.
+  if (active.CABIMAS) {
+    units.push(buildUnit(['CABIMAS'], active));
   }
 
-  // OJEDA group: absorbs CABIMAS, MENEGRANDE and/or BACHAQUERO when OJEDA is active
-  if (active['OJEDA'] && !isDedicatedZone(active, 'OJEDA')) {
-    const group = { zonas: ['OJEDA'], peso: active['OJEDA'].peso, valor: active['OJEDA'].valor };
-    if (active['CABIMAS'] && !isDedicatedZone(active, 'CABIMAS')) {
-      group.zonas.push('CABIMAS');
-      group.peso += active['CABIMAS'].peso;
-      group.valor += active['CABIMAS'].valor;
+  // OJEDA can go alone, and if MENEGRANDE/BACHAQUERO are active they always attach to OJEDA.
+  if (active.OJEDA) {
+    const ojedaGroup = ['OJEDA'];
+
+    if (active.MENEGRANDE) {
+      ojedaGroup.push('MENEGRANDE');
     }
-    if (active['MENEGRANDE'] && !isDedicatedZone(active, 'MENEGRANDE')) {
-      group.zonas.push('MENEGRANDE');
-      group.peso += active['MENEGRANDE'].peso;
-      group.valor += active['MENEGRANDE'].valor;
+
+    if (active.BACHAQUERO) {
+      ojedaGroup.push('BACHAQUERO');
     }
-    if (active['BACHAQUERO'] && !isDedicatedZone(active, 'BACHAQUERO')) {
-      group.zonas.push('BACHAQUERO');
-      group.peso += active['BACHAQUERO'].peso;
-      group.valor += active['BACHAQUERO'].valor;
-    }
-    units.push(group);
+
+    units.push(buildUnit(ojedaGroup, active));
   } else {
-    // OJEDA inactive → CABIMAS, MENEGRANDE and BACHAQUERO must go alone (no valid partner)
-    if (active['CABIMAS'] && !isDedicatedZone(active, 'CABIMAS')) {
-      units.push({ zonas: ['CABIMAS'], peso: active['CABIMAS'].peso, valor: active['CABIMAS'].valor });
+    if (active.MENEGRANDE) {
+      units.push(buildUnit(['MENEGRANDE'], active));
     }
-    if (active['MENEGRANDE'] && !isDedicatedZone(active, 'MENEGRANDE')) {
-      units.push({ zonas: ['MENEGRANDE'], peso: active['MENEGRANDE'].peso, valor: active['MENEGRANDE'].valor });
-    }
-    if (active['BACHAQUERO'] && !isDedicatedZone(active, 'BACHAQUERO')) {
-      units.push({ zonas: ['BACHAQUERO'], peso: active['BACHAQUERO'].peso, valor: active['BACHAQUERO'].valor });
+
+    if (active.BACHAQUERO) {
+      units.push(buildUnit(['BACHAQUERO'], active));
     }
   }
 
   // Flexible zones: NORTE, SUR, CENTRO, OESTE
-  const flexActive = ['NORTE', 'SUR', 'CENTRO', 'OESTE'].filter(z => active[z] && !isDedicatedZone(active, z));
+  const flexActive = ['NORTE', 'SUR', 'CENTRO', 'OESTE'].filter((zone) => active[zone]);
   units.push(...buildFlexUnits(flexActive, active));
 
   return units;
@@ -125,8 +139,8 @@ function buildFlexUnits(flexActive, active) {
 
     for (const [a, b] of optionSet) {
       if (!tentative.has(a) || !tentative.has(b)) continue;
-      const combinedPeso = (active[a]?.peso || 0) + (active[b]?.peso || 0);
-      if (combinedPeso <= TRUCK_CAP) {
+      const pairUnit = buildUnit([a, b], active);
+      if (canFitOwnFleet(pairUnit)) {
         viablePairs.push([a, b]);
         tentative.delete(a);
         tentative.delete(b);
@@ -135,7 +149,7 @@ function buildFlexUnits(flexActive, active) {
 
     // More pairs = better; tiebreak: more van-eligible pairs
     const vanEligibleCount = viablePairs.filter(
-      ([a, b]) => (active[a]?.peso || 0) + (active[b]?.peso || 0) <= VAN_CAP
+      ([a, b]) => canFitVan(buildUnit([a, b], active))
     ).length;
     const score = viablePairs.length * 10 + vanEligibleCount;
 
@@ -147,18 +161,14 @@ function buildFlexUnits(flexActive, active) {
 
   for (const [a, b] of bestPairs) {
     if (remaining.has(a) && remaining.has(b)) {
-      units.push({
-        zonas: [a, b],
-        peso: (active[a]?.peso || 0) + (active[b]?.peso || 0),
-        valor: (active[a]?.valor || 0) + (active[b]?.valor || 0),
-      });
+      units.push(buildUnit([a, b], active));
       remaining.delete(a);
       remaining.delete(b);
     }
   }
 
   for (const zone of remaining) {
-    units.push({ zonas: [zone], peso: active[zone].peso, valor: active[zone].valor });
+    units.push(buildUnit([zone], active));
   }
 
   return units;
@@ -174,9 +184,9 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
   const availableTrucks = [...vehicleAvailability.camionesDisponibles];
   const assignments = [];
 
-  const vanEligible = sorted.filter(u => u.peso <= VAN_CAP);
-  const needTruck   = sorted.filter(u => u.peso > VAN_CAP && u.peso <= TRUCK_CAP);
-  const tooBig      = sorted.filter(u => u.peso > TRUCK_CAP);
+  const vanEligible = sorted.filter((unit) => canFitVan(unit));
+  const needTruck = sorted.filter((unit) => !canFitVan(unit) && canFitTruck(unit));
+  const tooBig = sorted.filter((unit) => !canFitTruck(unit));
 
   // Fill vans first with lightweight units (by value priority)
   const spilloverToTruck = [];
@@ -244,6 +254,8 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
       rutasPospuestas: postponed.length,
       totalValorDespachado: dispatched.reduce((s, a) => s + a.valor, 0),
       totalValorPospuesto: postponed.reduce((s, a) => s + a.valor, 0),
+      totalClientesDespachados: dispatched.reduce((s, a) => s + (a.clientes || 0), 0),
+      totalClientesPospuestos: postponed.reduce((s, a) => s + (a.clientes || 0), 0),
     },
     disponibilidadVehiculos: {
       camionetas: vehicleAvailability.camionetas,
@@ -273,9 +285,9 @@ exports.calculateDispatch = (req, res) => {
       if (!ZONES_ALL.includes(zone)) continue;
       const peso  = Number(data.peso)  || 0;
       const valor = Number(data.valor) || 0;
-      const dedicado = Boolean(data.dedicado);
-      if (peso > 0 || valor > 0) {
-        active[zone] = { peso, valor, dedicado };
+      const clientes = Number(data.clientes) || 0;
+      if (peso > 0 || valor > 0 || clientes > 0) {
+        active[zone] = { peso, valor, clientes };
       }
     }
 
