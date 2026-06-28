@@ -1,6 +1,8 @@
 const PRIORITY_ZONE_ORDER = ['NORTE', 'OESTE', 'SUR', 'CENTRO'];
 const PRIORITY_ZONE_SET = new Set(PRIORITY_ZONE_ORDER);
 const PRIORITY_ZONE_WEIGHTS = { NORTE: 4, OESTE: 3, SUR: 2, CENTRO: 1 };
+const DEFAULT_EXTERNAL_COST = 170;
+const EXTERNAL_RATIO_LIMIT = 0.02;
 const SOLO_TRUCK_ZONES = new Set(['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA']);
 const VAN_RESTRICTED_ZONES = new Set(['MENEGRANDE', 'MACHIQUES', 'MARA']);
 const KNOWN_ZONE_NAMES = new Map([
@@ -307,6 +309,18 @@ function canUseExternal(unit) {
   return unit.kg_total <= 5000;
 }
 
+function getExternalCostRatio(unit, externalCost) {
+  if (!unit.valor_total_dolares) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return externalCost / unit.valor_total_dolares;
+}
+
+function meetsExternalRatioThreshold(unit, externalCost) {
+  return getExternalCostRatio(unit, externalCost) < EXTERNAL_RATIO_LIMIT;
+}
+
 function compareUnits(left, right) {
   return (
     right.prioridad_peso - left.prioridad_peso ||
@@ -335,6 +349,9 @@ function buildPlanItem(unit, vehicle, tipo, motivo) {
 }
 
 function buildExternalItem(unit, externalCost) {
+  const ratio = getExternalCostRatio(unit, externalCost);
+  const meetsRatioThreshold = ratio < EXTERNAL_RATIO_LIMIT;
+
   return {
     zona: unit.zonas.join(' + '),
     zonas: [...unit.zonas],
@@ -342,7 +359,11 @@ function buildExternalItem(unit, externalCost) {
     kg_total: unit.kg_total,
     clientes_total: unit.clientes_total,
     cajas_total: unit.cajas_total,
-    razon: 'REQUIERE_EXTERNO',
+    razon: meetsRatioThreshold ? 'REQUIERE_EXTERNO' : 'EXTERNO_ULTIMO_RECURSO',
+    costo_externo: externalCost,
+    indicador_flete_porcentaje: Number.isFinite(ratio) ? round(ratio * 100, 2) : null,
+    cumple_indicador_rentabilidad: meetsRatioThreshold,
+    es_ultimo_recurso: !meetsRatioThreshold,
     ganancia_neta_si_externo: round(unit.valor_total_dolares - externalCost, 2),
   };
 }
@@ -389,6 +410,8 @@ function scoreDecisionSet(plan, zonasExterno, zonasManana) {
   const totalValueToday = sum(plan.map((item) => item.valor_total_dolares)) + sum(zonasExterno.map((item) => item.valor_dolares));
   const externalZoneCount = sum(zonasExterno.map((item) => item.zonas.length));
   const priorityVanWeight = sum(plan.filter((item) => item.tipo === 'camioneta').map((item) => sum(item.zonas.map((zone) => PRIORITY_ZONE_WEIGHTS[zone] || 0))));
+  const lastResortExternalCount = zonasExterno.filter((item) => item.es_ultimo_recurso).length;
+  const rentableExternalCount = zonasExterno.length - lastResortExternalCount;
 
   return (
     priorityServedWeight * 1e12 -
@@ -396,7 +419,9 @@ function scoreDecisionSet(plan, zonasExterno, zonasManana) {
     ownPriorityWeight * 1e9 +
     totalServedZones * 1e7 +
     totalValueToday * 100 -
-    externalZoneCount * 1000 +
+    rentableExternalCount * 1e5 -
+    externalZoneCount * 1000 -
+    lastResortExternalCount * 1e10 +
     priorityVanWeight * 10
   );
 }
@@ -443,7 +468,7 @@ function searchAssignments(units, fleet, externalCost) {
       );
     }
 
-    if (canUseExternal(unit) && (externalCost <= 0 || unit.valor_total_dolares - externalCost > 0)) {
+    if (canUseExternal(unit)) {
       recurse(
         index + 1,
         availableVans,
@@ -492,6 +517,11 @@ function buildRecommendations(plan, zonasExterno, zonasManana) {
 
   if (zonasExterno.length) {
     notes.push(`Se recomienda externo para: ${zonasExterno.map((item) => item.zona).join('; ')}.`);
+  }
+
+  const lastResortExternal = zonasExterno.filter((item) => item.es_ultimo_recurso);
+  if (lastResortExternal.length) {
+    notes.push(`Externo como último recurso en: ${lastResortExternal.map((item) => `${item.zona} (${item.indicador_flete_porcentaje}% de flete)`).join('; ')}.`);
   }
 
   if (zonasManana.length) {
@@ -556,7 +586,8 @@ function calculateOptimalDispatch({ zonas, costoExternoReferencia, costo_externo
     throw error;
   }
 
-  const externalCost = Number(costoExternoReferencia ?? costo_externo_referencia) || 0;
+  const requestedExternalCost = Number(costoExternoReferencia ?? costo_externo_referencia);
+  const externalCost = requestedExternalCost > 0 ? requestedExternalCost : DEFAULT_EXTERNAL_COST;
   const zoneMap = buildZoneMap(normalizedZones);
   const fleet = buildVehicleAvailability(vehiculos);
   const planOptions = buildPlanOptions(zoneMap);

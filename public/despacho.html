@@ -463,7 +463,7 @@
           <div class="field-grid compact">
             <label>
               Costo externo de referencia
-              <input id="external-cost" type="number" min="0" step="0.01" value="0" placeholder="0.00">
+              <input id="external-cost" type="number" min="170" step="0.01" value="170" placeholder="170.00">
             </label>
             <label>
               Fecha base
@@ -732,6 +732,7 @@
             <div>Cajas: <strong>${number(item.cajas_total)}</strong></div>
             <div>Valor: <strong>${currency(item.valor_dolares)}</strong></div>
           </div>
+          <p>Indicador flete / viaje: <strong>${number(item.indicador_flete_porcentaje)}%</strong> ${item.cumple_indicador_rentabilidad ? '(dentro del 2%)' : '(último recurso, fuera del 2%)'}</p>
           <p>Ganancia neta estimada si se usa externo: <strong>${currency(item.ganancia_neta_si_externo)}</strong></p>
         </article>
       `).join('');
@@ -789,7 +790,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             zonas,
-            costo_externo_referencia: Number(document.getElementById('external-cost').value) || 0,
+            costo_externo_referencia: Number(document.getElementById('external-cost').value) || 170,
             fecha: document.getElementById('dispatch-date').value || undefined,
             vehiculos: collectVehicles(),
           }),
@@ -821,7 +822,7 @@
 
         zoneList.innerHTML = '';
         (data.zonas_input || []).forEach((zone) => addZoneRow(zone));
-        document.getElementById('external-cost').value = data.costo_externo_referencia || 0;
+        document.getElementById('external-cost').value = data.costo_externo_referencia || 170;
         hydrateVehicleAvailability(data.disponibilidad_vehiculos);
         renderResult(data, 'Último despacho');
         setStatus('Último despacho cargado.');
@@ -850,7 +851,7 @@
       zoneList.innerHTML = '';
       addZoneRow({ nombre: 'NORTE' });
       addZoneRow({ nombre: 'OESTE' });
-      document.getElementById('external-cost').value = 0;
+      document.getElementById('external-cost').value = 170;
       document.querySelectorAll('.toggle-item input[type="checkbox"]').forEach((checkbox) => {
         checkbox.checked = true;
       });
