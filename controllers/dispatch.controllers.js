@@ -11,6 +11,14 @@ const TRUCK_CLIENT_CAP = 30;
 const VAN_RESTRICTED_ZONES = new Set(['MENEGRANDE', 'MACHIQUES', 'MARA']);
 const VAN_LABELS = Array.from({ length: VAN_COUNT }, (_, index) => `Camioneta ${index + 1}`);
 const TRUCK_LABELS = Array.from({ length: TRUCK_COUNT }, (_, index) => `Camión ${index + 1}`);
+const FLEX_PRIORITY_ZONES = ['NORTE', 'SUR', 'CENTRO', 'OESTE'];
+const FLEX_ZONE_SET = new Set(FLEX_PRIORITY_ZONES);
+const FLEX_ALLOWED_PARTNERS = {
+  NORTE: ['CENTRO', 'OESTE'],
+  SUR: ['CENTRO', 'OESTE'],
+  CENTRO: ['NORTE', 'SUR'],
+  OESTE: ['NORTE', 'SUR'],
+};
 
 function normalizeVehicleList(rawList, labels) {
   if (!Array.isArray(rawList) || rawList.length === 0) {
@@ -71,28 +79,39 @@ function canFitTruck(unit) {
   return unit.peso <= TRUCK_CAP && unit.clientes <= TRUCK_CLIENT_CAP;
 }
 
-function canFitOwnFleet(unit) {
-  return canFitVan(unit) || canFitTruck(unit);
+function canFitExternalTruck(unit) {
+  return unit.peso <= TRUCK_CAP;
 }
 
-// ─── STEP 1: Build dispatch units respecting combination rules ────────────────
+function isFlexOnlyUnit(unit) {
+  return unit.zonas.every((zone) => FLEX_ZONE_SET.has(zone));
+}
 
-function buildDispatchUnits(active) {
+function isFlexSingleUnit(unit) {
+  return unit.zonas.length === 1 && isFlexOnlyUnit(unit);
+}
+
+function unitSignature(unit) {
+  return [...unit.zonas].sort().join('+');
+}
+
+function unitLabel(unit) {
+  return unit.zonas.join(' + ');
+}
+
+function buildFixedDispatchUnits(active) {
   const units = [];
 
-  // Mandatory solo zones (each always gets its own vehicle)
   for (const zone of ZONES_SOLO_REQUIRED) {
     if (active[zone]) {
       units.push(buildUnit([zone], active));
     }
   }
 
-  // CABIMAS always goes alone.
   if (active.CABIMAS) {
     units.push(buildUnit(['CABIMAS'], active));
   }
 
-  // OJEDA can go alone, and if MENEGRANDE/BACHAQUERO are active they always attach to OJEDA.
   if (active.OJEDA) {
     const ojedaGroup = ['OJEDA'];
 
@@ -115,135 +134,249 @@ function buildDispatchUnits(active) {
     }
   }
 
-  // Flexible zones: NORTE, SUR, CENTRO, OESTE
-  const flexActive = ['NORTE', 'SUR', 'CENTRO', 'OESTE'].filter((zone) => active[zone]);
-  units.push(...buildFlexUnits(flexActive, active));
-
   return units;
 }
 
-// Tries two pairing options and picks the best one (more pairs, more van-eligible)
-function buildFlexUnits(flexActive, active) {
-  const remaining = new Set(flexActive);
-  const units = [];
+function buildFlexUnitOptions(active) {
+  const flexActive = FLEX_PRIORITY_ZONES.filter((zone) => active[zone]);
 
-  // Both valid full-pairing options for the 4 flexible zones
-  const OPTION_SETS = [
-    [['NORTE', 'CENTRO'], ['SUR', 'OESTE']],
-    [['NORTE', 'OESTE'], ['SUR', 'CENTRO']],
-  ];
+  if (!flexActive.length) {
+    return [[]];
+  }
 
-  let bestPairs = [];
-  let bestScore = -1;
+  const options = [];
+  const seen = new Set();
 
-  for (const optionSet of OPTION_SETS) {
-    const viablePairs = [];
-    const tentative = new Set(remaining);
+  function explore(remaining, groups) {
+    if (!remaining.length) {
+      const units = groups.map((zonas) => buildUnit(zonas, active));
+      const signature = units.map(unitSignature).sort().join('|');
 
-    for (const [a, b] of optionSet) {
-      if (!tentative.has(a) || !tentative.has(b)) continue;
-      const pairUnit = buildUnit([a, b], active);
-      if (canFitOwnFleet(pairUnit)) {
-        viablePairs.push([a, b]);
-        tentative.delete(a);
-        tentative.delete(b);
+      if (!seen.has(signature)) {
+        seen.add(signature);
+        options.push(units);
       }
+
+      return;
     }
 
-    // More pairs = better; tiebreak: more van-eligible pairs
-    const vanEligibleCount = viablePairs.filter(
-      ([a, b]) => canFitVan(buildUnit([a, b], active))
-    ).length;
-    const score = viablePairs.length * 10 + vanEligibleCount;
+    const [first, ...rest] = remaining;
 
-    if (score > bestScore) {
-      bestScore = score;
-      bestPairs = viablePairs;
-    }
-  }
+    explore(rest, [...groups, [first]]);
 
-  for (const [a, b] of bestPairs) {
-    if (remaining.has(a) && remaining.has(b)) {
-      units.push(buildUnit([a, b], active));
-      remaining.delete(a);
-      remaining.delete(b);
+    for (const partner of rest) {
+      if (!(FLEX_ALLOWED_PARTNERS[first] || []).includes(partner)) {
+        continue;
+      }
+
+      const nextRemaining = rest.filter((zone) => zone !== partner);
+      explore(nextRemaining, [...groups, [first, partner]]);
     }
   }
 
-  for (const zone of remaining) {
-    units.push(buildUnit([zone], active));
-  }
+  explore(flexActive, []);
 
-  return units;
+  return options;
 }
 
-// ─── STEP 2: Assign units to vehicles ────────────────────────────────────────
+function buildDispatchOptions(active) {
+  const fixedUnits = buildFixedDispatchUnits(active);
+  const flexOptions = buildFlexUnitOptions(active);
+
+  return flexOptions.map((flexUnits) => [...fixedUnits, ...flexUnits]);
+}
+
+function compareByValue(a, b) {
+  return b.valor - a.valor || b.peso - a.peso || b.clientes - a.clientes;
+}
+
+function compareTruckPriority(a, b) {
+  return (
+    b.zonas.length - a.zonas.length ||
+    Number(isFlexOnlyUnit(b)) - Number(isFlexOnlyUnit(a)) ||
+    b.valor - a.valor ||
+    b.peso - a.peso ||
+    b.clientes - a.clientes
+  );
+}
+
+function buildAssignmentReason(unit, tipo, externalCost, netValue) {
+  if (tipo === 'camioneta') {
+    if (isFlexSingleUnit(unit)) {
+      return 'Camioneta priorizada para zona flexible.';
+    }
+
+    return 'Unidad compatible con camioneta propia.';
+  }
+
+  if (tipo === 'camion') {
+    if (unit.zonas.length > 1 && isFlexOnlyUnit(unit)) {
+      return 'Camión propio agrupando zonas para cubrir más rutas sin dejarlas pendientes.';
+    }
+
+    if (unit.zonas.some((zone) => VAN_RESTRICTED_ZONES.has(zone))) {
+      return 'Zona restringida para camioneta; requiere camión.';
+    }
+
+    return 'Camión propio asignado por capacidad o para liberar camionetas en zonas prioritarias.';
+  }
+
+  if (tipo === 'externo') {
+    if (externalCost > 0 && netValue < 0) {
+      return 'Camión externo recomendado para cubrir la zona, aunque el margen queda negativo.';
+    }
+
+    if (externalCost > 0) {
+      return 'Camión externo recomendado para atender la ruta sin dejarla pendiente.';
+    }
+
+    return 'Camión externo recomendado para cubrir la ruta; configura el costo para calcular el margen.';
+  }
+
+  return 'No hay capacidad propia suficiente y la unidad excede la capacidad asumida de camión externo.';
+}
+
+function buildRecommendations(assignments) {
+  const notes = [];
+  const vans = assignments.filter((assignment) => assignment.tipo === 'camioneta' && isFlexSingleUnit(assignment));
+  const groupedTrucks = assignments.filter((assignment) => assignment.tipo === 'camion' && assignment.zonas.length > 1 && isFlexOnlyUnit(assignment));
+  const externals = assignments.filter((assignment) => assignment.tipo === 'externo');
+  const postponed = assignments.filter((assignment) => assignment.tipo === 'posponer');
+
+  if (vans.length) {
+    notes.push(`Se priorizaron camionetas propias para ${vans.map((assignment) => assignment.zonas[0]).join(', ')}.`);
+  }
+
+  if (groupedTrucks.length) {
+    notes.push(`Conviene agrupar en camión propio: ${groupedTrucks.map((assignment) => unitLabel(assignment)).join('; ')}.`);
+  }
+
+  if (externals.length) {
+    notes.push(`Usar camión externo para ${externals.map((assignment) => unitLabel(assignment)).join('; ')} para no dejar zonas sin atender.`);
+  }
+
+  if (postponed.length) {
+    notes.push(`Quedan pospuestas: ${postponed.map((assignment) => unitLabel(assignment)).join('; ')}.`);
+  }
+
+  return notes;
+}
 
 function assignToVehicles(units, externalCost, vehicleAvailability) {
-  // Priority: higher value dispatched first
-  const sorted = [...units].sort((a, b) => b.valor - a.valor);
-
   const availableVans = [...vehicleAvailability.camionetasDisponibles];
   const availableTrucks = [...vehicleAvailability.camionesDisponibles];
   const assignments = [];
+  const assignedSignatures = new Set();
 
-  const vanEligible = sorted.filter((unit) => canFitVan(unit));
-  const needTruck = sorted.filter((unit) => !canFitVan(unit) && canFitTruck(unit));
-  const tooBig = sorted.filter((unit) => !canFitTruck(unit));
-
-  // Fill vans first with lightweight units (by value priority)
-  const spilloverToTruck = [];
-  for (const unit of vanEligible) {
-    if (availableVans.length > 0) {
-      const nextVan = availableVans.shift();
-      assignments.push({ ...unit, vehiculo: nextVan.nombre, tipo: 'camioneta', estado: 'asignado' });
-    } else {
-      spilloverToTruck.push(unit);
-    }
+  function markAssigned(unit, payload) {
+    assignments.push(payload);
+    assignedSignatures.add(unitSignature(unit));
   }
 
-  // Fill trucks with heavy units + van spill (by value priority, already sorted)
-  const overflowFinal = [];
-  for (const unit of [...spilloverToTruck, ...needTruck]) {
-    if (availableTrucks.length > 0) {
-      const nextTruck = availableTrucks.shift();
-      assignments.push({ ...unit, vehiculo: nextTruck.nombre, tipo: 'camion', estado: 'asignado' });
-    } else {
-      overflowFinal.push(unit);
-    }
+  function isUnassigned(unit) {
+    return !assignedSignatures.has(unitSignature(unit));
   }
 
-  // Fleet exceeded (or weight > 5000) → external vehicle decision
-  const overflow = [...overflowFinal, ...tooBig].sort((a, b) => b.valor - a.valor);
+  const preferredVanUnits = units
+    .filter((unit) => isFlexSingleUnit(unit) && canFitVan(unit))
+    .sort(compareByValue);
+
+  for (const unit of preferredVanUnits) {
+    if (availableVans.length === 0) {
+      break;
+    }
+
+    const nextVan = availableVans.shift();
+    markAssigned(unit, {
+      ...unit,
+      vehiculo: nextVan.nombre,
+      tipo: 'camioneta',
+      estado: 'asignado',
+      motivo: buildAssignmentReason(unit, 'camioneta', externalCost, unit.valor - externalCost),
+    });
+  }
+
+  const otherVanUnits = units
+    .filter((unit) => isUnassigned(unit) && canFitVan(unit))
+    .sort(compareByValue);
+
+  for (const unit of otherVanUnits) {
+    if (availableVans.length === 0) {
+      break;
+    }
+
+    const nextVan = availableVans.shift();
+    markAssigned(unit, {
+      ...unit,
+      vehiculo: nextVan.nombre,
+      tipo: 'camioneta',
+      estado: 'asignado',
+      motivo: buildAssignmentReason(unit, 'camioneta', externalCost, unit.valor - externalCost),
+    });
+  }
+
+  const truckCandidates = units
+    .filter((unit) => isUnassigned(unit) && canFitTruck(unit))
+    .sort(compareTruckPriority);
+
+  for (const unit of truckCandidates) {
+    if (availableTrucks.length === 0) {
+      break;
+    }
+
+    const nextTruck = availableTrucks.shift();
+    markAssigned(unit, {
+      ...unit,
+      vehiculo: nextTruck.nombre,
+      tipo: 'camion',
+      estado: 'asignado',
+      motivo: buildAssignmentReason(unit, 'camion', externalCost, unit.valor - externalCost),
+    });
+  }
+
+  const overflow = units
+    .filter((unit) => isUnassigned(unit))
+    .sort(compareTruckPriority);
+
   for (const unit of overflow) {
     const netValue = unit.valor - externalCost;
-    // External only makes sense when cost is configured and margin is positive
-    if (externalCost > 0 && netValue > 0) {
-      assignments.push({
+
+    if (canFitExternalTruck(unit)) {
+      markAssigned(unit, {
         ...unit,
         vehiculo: 'Vehículo Externo',
         tipo: 'externo',
         estado: 'externo',
         costoExterno: externalCost,
         gananciaNeta: netValue,
+        motivo: buildAssignmentReason(unit, 'externo', externalCost, netValue),
       });
-    } else {
-      assignments.push({
-        ...unit,
-        vehiculo: null,
-        tipo: 'posponer',
-        estado: 'posponer',
-        costoExterno: externalCost,
-        gananciaNeta: netValue,
-      });
+      continue;
     }
+
+    markAssigned(unit, {
+      ...unit,
+      vehiculo: null,
+      tipo: 'posponer',
+      estado: 'posponer',
+      costoExterno: externalCost,
+      gananciaNeta: netValue,
+      motivo: buildAssignmentReason(unit, 'posponer', externalCost, netValue),
+    });
   }
 
-  const dispatched = assignments.filter(a => a.estado === 'asignado' || a.estado === 'externo');
-  const postponed  = assignments.filter(a => a.estado === 'posponer');
+  const dispatched = assignments.filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo');
+  const postponed = assignments.filter((assignment) => assignment.estado === 'posponer');
 
   return {
     asignaciones: assignments,
+    recomendaciones: buildRecommendations(assignments),
+    estrategia: {
+      flexAgrupaciones: units
+        .filter((unit) => isFlexOnlyUnit(unit))
+        .map((unit) => [...unit.zonas]),
+      criterio: 'Prioridad de camionetas en NORTE, SUR, CENTRO y OESTE; camión propio o externo para cubrir la mayor cantidad posible de zonas.',
+    },
     resumen: {
       camionetasConfiguradas: vehicleAvailability.camionetas.length,
       camionetasHabilitadas: vehicleAvailability.camionetasDisponibles.length,
@@ -253,12 +386,12 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
       camionesHabilitados: vehicleAvailability.camionesDisponibles.length,
       camionesUsados: vehicleAvailability.camionesDisponibles.length - availableTrucks.length,
       camionesSinUsar: availableTrucks.length,
-      externosRequeridos: assignments.filter(a => a.estado === 'externo').length,
+      externosRequeridos: assignments.filter((assignment) => assignment.estado === 'externo').length,
       rutasPospuestas: postponed.length,
-      totalValorDespachado: dispatched.reduce((s, a) => s + a.valor, 0),
-      totalValorPospuesto: postponed.reduce((s, a) => s + a.valor, 0),
-      totalClientesDespachados: dispatched.reduce((s, a) => s + (a.clientes || 0), 0),
-      totalClientesPospuestos: postponed.reduce((s, a) => s + (a.clientes || 0), 0),
+      totalValorDespachado: dispatched.reduce((sum, assignment) => sum + assignment.valor, 0),
+      totalValorPospuesto: postponed.reduce((sum, assignment) => sum + assignment.valor, 0),
+      totalClientesDespachados: dispatched.reduce((sum, assignment) => sum + (assignment.clientes || 0), 0),
+      totalClientesPospuestos: postponed.reduce((sum, assignment) => sum + (assignment.clientes || 0), 0),
     },
     disponibilidadVehiculos: {
       camionetas: vehicleAvailability.camionetas,
@@ -267,7 +400,49 @@ function assignToVehicles(units, externalCost, vehicleAvailability) {
   };
 }
 
-// ─── Controllers ─────────────────────────────────────────────────────────────
+function scoreDispatchResult(result) {
+  const servedZones = result.asignaciones
+    .filter((assignment) => assignment.estado === 'asignado' || assignment.estado === 'externo')
+    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
+  const externalZones = result.asignaciones
+    .filter((assignment) => assignment.estado === 'externo')
+    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
+  const postponedZones = result.asignaciones
+    .filter((assignment) => assignment.estado === 'posponer')
+    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
+  const preferredVanZones = result.asignaciones
+    .filter((assignment) => assignment.tipo === 'camioneta' && isFlexSingleUnit(assignment))
+    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
+  const ownFleetZones = result.asignaciones
+    .filter((assignment) => assignment.estado === 'asignado')
+    .reduce((sum, assignment) => sum + assignment.zonas.length, 0);
+
+  return (
+    servedZones * 100000 -
+    postponedZones * 1000000 -
+    externalZones * 1000 +
+    preferredVanZones * 100 +
+    ownFleetZones * 10 +
+    result.resumen.totalValorDespachado / 100
+  );
+}
+
+function chooseBestDispatchResult(options, externalCost, vehicleAvailability) {
+  let bestResult = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const units of options) {
+    const result = assignToVehicles(units, externalCost, vehicleAvailability);
+    const score = scoreDispatchResult(result);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestResult = result;
+    }
+  }
+
+  return bestResult;
+}
 
 exports.getDispatchPage = (req, res) => {
   res.sendFile(path.join(__dirname, '../public/dispatch.html'));
@@ -286,9 +461,10 @@ exports.calculateDispatch = (req, res) => {
     const active = {};
     for (const [zone, data] of Object.entries(zonas)) {
       if (!ZONES_ALL.includes(zone)) continue;
-      const peso  = Number(data.peso)  || 0;
+      const peso = Number(data.peso) || 0;
       const valor = Number(data.valor) || 0;
       const clientes = Number(data.clientes) || 0;
+
       if (peso > 0 || valor > 0 || clientes > 0) {
         active[zone] = { peso, valor, clientes };
       }
@@ -299,8 +475,8 @@ exports.calculateDispatch = (req, res) => {
     }
 
     const vehicleAvailability = buildVehicleAvailability(vehiculos);
-    const units  = buildDispatchUnits(active);
-    const result = assignToVehicles(units, externalCost, vehicleAvailability);
+    const dispatchOptions = buildDispatchOptions(active);
+    const result = chooseBestDispatchResult(dispatchOptions, externalCost, vehicleAvailability);
 
     res.json({
       success: true,
