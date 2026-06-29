@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro de Picking</title>
+  <style>
+    :root {
+      --bg: #f3efe7;
+      --card: rgba(255,255,255,0.88);
+      --ink: #1c2733;
+      --muted: #5c6b78;
+      --line: rgba(28,39,51,0.12);
+      --accent: #0f766e;
+      --accent-dark: #115e59;
+      --danger: #b42318;
+      --shadow: 0 18px 48px rgba(17, 94, 89, 0.14);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--ink);
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top right, rgba(15,118,110,0.16), transparent 28%),
+        radial-gradient(circle at bottom left, rgba(180,35,24,0.08), transparent 24%),
+        linear-gradient(180deg, #f8f5ee 0%, #efe7d9 100%);
+    }
+
+    .shell {
+      width: min(1320px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 24px 0 40px;
+    }
+
+    .hero, .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 24px;
+    }
+
+    .hero h1 { margin: 0 0 8px; font-size: clamp(2rem, 4vw, 3rem); }
+    .hero p { margin: 0; color: var(--muted); max-width: 860px; line-height: 1.5; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 0.95fr 1.05fr;
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .panel { padding: 22px; }
+    .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .panel-title h2, .panel-title p { margin: 0; }
+    .panel-title p { color: var(--muted); }
+
+    .stack { display: grid; gap: 14px; }
+    .grid-2, .grid-3 { display: grid; gap: 12px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    label { display: grid; gap: 8px; font-weight: 600; color: var(--muted); }
+    input, button, table { font: inherit; }
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: rgba(255,255,255,0.92);
+      color: var(--ink);
+    }
+
+    button {
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 16px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #fff; }
+    .btn-secondary { background: rgba(15,118,110,0.12); color: var(--accent-dark); }
+    .status { min-height: 24px; color: var(--muted); font-weight: 600; }
+    .status.error { color: var(--danger); }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(255,255,255,0.78);
+    }
+    .metric span { display: block; color: var(--muted); margin-bottom: 6px; }
+    .metric strong { font-size: 1.25rem; }
+
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.84);
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid rgba(28,39,51,0.08); }
+    th { background: rgba(15,118,110,0.08); }
+    tr:last-child td { border-bottom: 0; }
+
+    .section-title { margin: 0 0 12px; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .grid-2, .grid-3, .metric-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <h1>Registro de picking</h1>
+      <p>Registra cada pedido picado por almacén. Luego, con la clave administrativa, consulta resumen por día o por rango para ver quién hizo más picking, cuántas cajas movió y cuántos pedidos procesó.</p>
+    </section>
+
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-title">
+          <div>
+            <h2>Cargar picking</h2>
+            <p>Un registro por pedido.</p>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="grid-3">
+            <label>
+              ID responsable
+              <input id="responsable-id" type="text" placeholder="Ej: ALM-01">
+            </label>
+            <label>
+              Numero pedido
+              <input id="numero-pedido" type="text" placeholder="Ej: PED-10544">
+            </label>
+            <label>
+              Numero cajas
+              <input id="numero-cajas" type="number" min="1" step="1" value="1">
+            </label>
+          </div>
+
+          <button class="btn-primary" id="save-picking" type="button">Guardar picking</button>
+          <div id="save-status" class="status"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <div>
+            <h2>Resumen administrativo</h2>
+            <p>Consulta con la clave configurada en el backend.</p>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="grid-2">
+            <label>
+              Clave administrativa
+              <input id="admin-key" type="password" placeholder="ADMIN_DELETE_KEY">
+            </label>
+            <label>
+              Fecha unica
+              <input id="single-date" type="date">
+            </label>
+          </div>
+
+          <div class="grid-2">
+            <label>
+              Desde
+              <input id="from-date" type="date">
+            </label>
+            <label>
+              Hasta
+              <input id="to-date" type="date">
+            </label>
+          </div>
+
+          <div class="grid-2">
+            <button class="btn-secondary" id="load-summary" type="button">Consultar resumen</button>
+            <button class="btn-secondary" id="load-recent" type="button">Ver recientes</button>
+          </div>
+
+          <div id="summary-status" class="status"></div>
+
+          <div id="summary-metrics" class="metric-grid"></div>
+
+          <div>
+            <h3 class="section-title">Ranking por responsable</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Responsable</th>
+                    <th>Pedidos</th>
+                    <th>Cajas</th>
+                  </tr>
+                </thead>
+                <tbody id="ranking-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <h3 class="section-title">Detalle de pedidos</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Responsable</th>
+                    <th>Pedido</th>
+                    <th>Cajas</th>
+                  </tr>
+                </thead>
+                <tbody id="reports-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const saveStatus = document.getElementById('save-status');
+    const summaryStatus = document.getElementById('summary-status');
+
+    function setToday() {
+      const today = new Date().toISOString().slice(0, 10);
+      document.getElementById('single-date').value = today;
+      document.getElementById('from-date').value = today;
+      document.getElementById('to-date').value = today;
+    }
+
+    function setStatus(node, message, isError = false) {
+      node.textContent = message;
+      node.className = isError ? 'status error' : 'status';
+    }
+
+    function number(value) {
+      return new Intl.NumberFormat('es-VE').format(Number(value) || 0);
+    }
+
+    async function savePicking() {
+      const payload = {
+        responsableId: document.getElementById('responsable-id').value.trim(),
+        numeroPedido: document.getElementById('numero-pedido').value.trim(),
+        numeroCajas: Number(document.getElementById('numero-cajas').value) || 0,
+      };
+
+      if (!payload.responsableId || !payload.numeroPedido || !payload.numeroCajas) {
+        setStatus(saveStatus, 'Completa responsable, pedido y cajas.', true);
+        return;
+      }
+
+      setStatus(saveStatus, 'Guardando picking...');
+
+      try {
+        const response = await fetch('/picking-reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.message || 'No se pudo guardar el picking.');
+        }
+
+        setStatus(saveStatus, 'Picking guardado correctamente.');
+        document.getElementById('numero-pedido').value = '';
+        document.getElementById('numero-cajas').value = 1;
+      } catch (error) {
+        setStatus(saveStatus, error.message || 'No se pudo guardar el picking.', true);
+      }
+    }
+
+    function buildQueryString() {
+      const singleDate = document.getElementById('single-date').value;
+      const fromDate = document.getElementById('from-date').value;
+      const toDate = document.getElementById('to-date').value;
+      const params = new URLSearchParams();
+
+      if (singleDate) {
+        params.set('fecha', singleDate);
+      } else {
+        if (fromDate) params.set('desde', fromDate);
+        if (toDate) params.set('hasta', toDate);
+      }
+
+      return params.toString();
+    }
+
+    function renderMetrics(summary) {
+      const container = document.getElementById('summary-metrics');
+      const top = summary?.responsableConMasPicking;
+      const items = [
+        ['Total pedidos', number(summary?.totalPedidos)],
+        ['Total cajas', number(summary?.totalCajas)],
+        ['Responsables activos', number(summary?.responsablesActivos)],
+        ['Mayor picking', top ? `${top.responsableId} (${number(top.totalPedidos)} pedidos)` : 'Sin datos'],
+      ];
+
+      container.innerHTML = items.map(([label, value]) => `
+        <article class="metric">
+          <span>${label}</span>
+          <strong>${value}</strong>
+        </article>
+      `).join('');
+    }
+
+    function renderRanking(items) {
+      const body = document.getElementById('ranking-body');
+      body.innerHTML = items.map((item) => `
+        <tr>
+          <td>${item.responsableId}</td>
+          <td>${number(item.totalPedidos)}</td>
+          <td>${number(item.totalCajas)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="3">Sin datos</td></tr>';
+    }
+
+    function renderReports(items) {
+      const body = document.getElementById('reports-body');
+      body.innerHTML = items.map((item) => `
+        <tr>
+          <td>${new Date(item.fechaHoraRegistro).toLocaleString('es-VE')}</td>
+          <td>${item.responsableId}</td>
+          <td>${item.numeroPedido}</td>
+          <td>${number(item.numeroCajas)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="4">Sin datos</td></tr>';
+    }
+
+    async function loadSummary() {
+      const adminKey = document.getElementById('admin-key').value.trim();
+      if (!adminKey) {
+        setStatus(summaryStatus, 'Debes escribir la clave administrativa.', true);
+        return;
+      }
+
+      setStatus(summaryStatus, 'Consultando resumen...');
+
+      try {
+        const response = await fetch(`/internal/admin/picking-reports/summary?${buildQueryString()}`, {
+          headers: { 'x-admin-delete-key': adminKey },
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.message || 'No se pudo consultar el resumen.');
+        }
+
+        renderMetrics(data.resumen);
+        renderRanking(data.ranking || []);
+        renderReports(data.reportes || []);
+        setStatus(summaryStatus, 'Resumen cargado correctamente.');
+      } catch (error) {
+        setStatus(summaryStatus, error.message || 'No se pudo consultar el resumen.', true);
+      }
+    }
+
+    async function loadRecent() {
+      const adminKey = document.getElementById('admin-key').value.trim();
+      if (!adminKey) {
+        setStatus(summaryStatus, 'Debes escribir la clave administrativa.', true);
+        return;
+      }
+
+      setStatus(summaryStatus, 'Consultando recientes...');
+
+      try {
+        const response = await fetch('/internal/admin/picking-reports?limit=50', {
+          headers: { 'x-admin-delete-key': adminKey },
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.message || 'No se pudo consultar el detalle.');
+        }
+
+        renderMetrics({ totalPedidos: data.total, totalCajas: 0, responsablesActivos: 0, responsableConMasPicking: null });
+        renderRanking([]);
+        renderReports(data.reportes || []);
+        setStatus(summaryStatus, 'Detalle reciente cargado.');
+      } catch (error) {
+        setStatus(summaryStatus, error.message || 'No se pudo consultar el detalle.', true);
+      }
+    }
+
+    document.getElementById('save-picking').addEventListener('click', savePicking);
+    document.getElementById('load-summary').addEventListener('click', loadSummary);
+    document.getElementById('load-recent').addEventListener('click', loadRecent);
+    setToday();
+  </script>
+</body>
+</html>

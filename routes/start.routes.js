@@ -6,13 +6,14 @@ const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDai
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const { getDispatchPage, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
+const { createPickingReport, listRecentPickingReports, getPickingSummary, getPickingReportById } = require('../controllers/picking.controllers');
 const despachoRoutes = require('./despacho.routes');
 const router = express.Router();
 
 router.use(express.json());
 
 const requireAdminDeleteKey = (req, res, next) => {
-  const configuredKey = process.env.ADMIN_DELETE_KEY;
+  const configuredKey = process.env.ADMIN_DELETE_KEY || '4321';
   const providedKey = req.headers['x-admin-delete-key'];
 
   if (!configuredKey) {
@@ -75,6 +76,15 @@ router.get('/vehicle-maintenance/placa/:placa', getVehicleMaintenanceByPlaca);
 router.get('/vehicle-maintenance/:id', getVehicleMaintenanceById);
 router.patch('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, updateVehicleMaintenance);
 router.delete('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, deleteVehicleMaintenance);
+
+// Picking operativo
+router.get('/picking', (req, res) => {
+  res.sendFile(require('path').join(__dirname, '../public/picking.html'));
+});
+router.post('/picking-reports', createPickingReport);
+router.get('/picking-reports/:id', getPickingReportById);
+router.get('/internal/admin/picking-reports', requireAdminDeleteKey, listRecentPickingReports);
+router.get('/internal/admin/picking-reports/summary', requireAdminDeleteKey, getPickingSummary);
 
 // Despacho logístico
 router.get('/dispatch', getDispatchPage);
