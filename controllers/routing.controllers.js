@@ -327,6 +327,7 @@ const makeRoute = async (req, res) => {
   try {
     const { ids, stops, driverId, driverName, routeLabel, routeType } = req.body;
     const routeWeight = normalizeWeight(req.body?.routeWeight);
+    const anchorClientId = typeof req.body?.anchorClientId === "string" ? req.body.anchorClientId.trim() : null;
     const { normalizedStops, uniqueStops, duplicateClientIds } = normalizeRequestedStops({ ids, stops });
 
     if (!Array.isArray(normalizedStops)) {
@@ -344,7 +345,7 @@ const makeRoute = async (req, res) => {
 
     const foundIds = clients.map((client) => client.id);
     const { notFoundIds, notFoundClients } = buildMissingClients(uniqueIds, foundIds);
-    const routeOptions = await buildRouteOptions(clients);
+    const routeOptions = await buildRouteOptions(clients, { anchorClientId: anchorClientId || undefined });
 
     if (routeOptions.length < 1) {
       return res

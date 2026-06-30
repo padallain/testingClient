@@ -22,6 +22,11 @@ const ROUTE_TYPE_META = {
     label: "Orden alfabetico",
     description: "Ordena la visita por nombre del cliente para una revision manual.",
   },
+  mirrored: {
+    type: "mirrored",
+    label: "Espejo",
+    description: "Invierte la ruta optima. Ideal para cubrir la zona contraria primero sin recalcular.",
+  },
 };
 
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -126,8 +131,9 @@ const buildMissingClients = (uniqueIds, foundIds) => {
 
 const getClientsWithCoordinates = (clients) => clients.filter((client) => hasValidLocation(client?.location));
 
-const splitStartClient = (clients) => {
-  const startClientIndex = clients.findIndex((client) => client.id === START_ID);
+const splitStartClient = (clients, anchorId) => {
+  const effectiveAnchorId = anchorId || START_ID;
+  const startClientIndex = clients.findIndex((client) => client.id === effectiveAnchorId);
   const startClient = startClientIndex !== -1 ? clients[startClientIndex] : null;
   const restClients = startClientIndex !== -1
     ? [
@@ -155,7 +161,7 @@ const buildRoundTripCoordinates = (route) => {
   return coordinates;
 };
 
-const buildIndexedClients = (clients) => {
+const buildIndexedClients = (clients, anchorId) => {
   const clientsWithCoordinates = getClientsWithCoordinates(clients);
 
   if (clientsWithCoordinates.length === 0) {
@@ -165,7 +171,7 @@ const buildIndexedClients = (clients) => {
     };
   }
 
-  const { startClient, restClients } = splitStartClient(clientsWithCoordinates);
+  const { startClient, restClients } = splitStartClient(clientsWithCoordinates, anchorId);
   const orderedClients = startClient ? [startClient, ...restClients] : restClients;
 
   return {
@@ -390,8 +396,8 @@ const calculateRouteDistanceFallback = (route) => {
   return toRoundedDistance(totalDistance);
 };
 
-const buildRouteContext = async (clients) => {
-  const { startClient, indexedClients } = buildIndexedClients(clients);
+const buildRouteContext = async (clients, options = {}) => {
+  const { startClient, indexedClients } = buildIndexedClients(clients, options.anchorClientId);
 
   if (indexedClients.length === 0) {
     return {
@@ -429,18 +435,33 @@ const buildOptimizedRoute = async (clients) => {
   return routeOptions[0]?.route || [];
 };
 
-const buildRouteOptions = async (clients) => {
-  const { startClient, indexedClients, distanceMatrix } = await buildRouteContext(clients);
+const buildMirroredIndexedRoute = (optimizedRoute, lockedPrefixLength) => {
+  if (lockedPrefixLength > 0) {
+    const anchorStops = optimizedRoute.slice(0, lockedPrefixLength);
+    const remainingStops = optimizedRoute.slice(lockedPrefixLength);
+    return [...anchorStops, ...remainingStops.reverse()];
+  }
+
+  return [...optimizedRoute].reverse();
+};
+
+const buildRouteOptions = async (clients, options = {}) => {
+  const { startClient, indexedClients, distanceMatrix } = await buildRouteContext(clients, options);
 
   if (indexedClients.length === 0) {
     return [];
   }
 
   const lockedPrefixLength = startClient ? 1 : 0;
+
+  const closestGreedy = buildGreedyRoute(indexedClients, distanceMatrix, false);
+  const closestOptimized = optimizeClosedRouteWithTwoOpt(closestGreedy, distanceMatrix, lockedPrefixLength);
+  const mirroredIndexed = buildMirroredIndexedRoute(closestOptimized, lockedPrefixLength);
+
   const optionBuilders = [
     buildRouteOption(
       ROUTE_TYPE_META.closest,
-      buildGreedyRoute(indexedClients, distanceMatrix, false),
+      closestGreedy,
       distanceMatrix,
       lockedPrefixLength,
     ),
@@ -457,6 +478,16 @@ const buildRouteOptions = async (clients) => {
       lockedPrefixLength,
     ),
   ].filter((option) => option.route.length > 0);
+
+  if (mirroredIndexed.length > 0) {
+    optionBuilders.push({
+      ...ROUTE_TYPE_META.mirrored,
+      route: stripMatrixIndex(mirroredIndexed),
+      estimatedDistanceKm: toRoundedDistance(
+        calculateClosedRouteDistanceFromMatrix(mirroredIndexed, distanceMatrix),
+      ),
+    });
+  }
 
   const seenSignatures = new Set();
 
