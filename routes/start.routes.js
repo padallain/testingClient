@@ -1,7 +1,7 @@
 const express = require('express');
 const { register, login, authMiddleware } = require('../controllers/auth.controllers');
 const { makeRoute, getDriverCurrentRoute, listRouteAssignments, listRouteDispatchStatuses, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
-const { registerClient, countClients, getClient, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
+const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const { getDispatchPage, calculateDispatch } = require('../controllers/dispatch.controllers');
@@ -40,6 +40,7 @@ router.post('/login', login);
 router.post('/registerClient', registerClient);
 router.get('/countClients', countClients);
 router.get('/getClient/:id', getClient);
+router.get('/getClient/:id/sedes', getClientBranches);
 router.post('/clientLocationReports', createClientLocationReport);
 router.get('/clientLocationReports', listClientLocationReports);
 router.get('/internal/admin/clientLocationReports', requireAdminDeleteKey, listClientLocationReports);

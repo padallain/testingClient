@@ -1,23 +1,26 @@
 const Client = require("../models/client.model");
 const ClientLocationReport = require("../models/clientLocationReport.model");
 
-// REGISTRO DE USUARIO (CLIENTE)
 const registerClient = async (req, res) => {
   try {
-    const { id, nombre, latitude, longitude, start, end } = req.body;
+    const { id, nombre, latitude, longitude, start, end, sucursal } = req.body;
 
     if (!id || !nombre || !latitude || !longitude || !start || !end) {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const existingClient = await Client.findOne({ id });
+    const normalizedSucursal = typeof sucursal === 'string' ? sucursal.trim() : '';
+
+    const existingClient = await Client.findOne({ id, sucursal: normalizedSucursal });
     if (existingClient) {
-      return res.status(400).json({ message: 'Client with this ID already exists' });
+      const label = normalizedSucursal ? `(${normalizedSucursal})` : '';
+      return res.status(400).json({ message: `Client with this ID ${label} already exists`.trim() });
     }
 
     const newClient = new Client({
       id,
       nombre,
+      sucursal: normalizedSucursal,
       location: { latitude, longitude },
       schedule: { start, end },
     });
@@ -41,26 +44,44 @@ const countClients = async (req, res) => {
   }
 };
 
+const buildClientResponse = (client) => {
+  const hasValidCoordinates =
+    client.location &&
+    Number.isFinite(Number(client.location.latitude)) &&
+    Number.isFinite(Number(client.location.longitude));
+
+  return {
+    ...client,
+    googleMapsLink: hasValidCoordinates
+      ? `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`
+      : "",
+  };
+};
+
+// Returns a single client. If the ID belongs to a chain, returns the first branch
+// and includes a `esCadena: true` flag with `totalSedes` so the caller knows to
+// use /getClient/:id/sedes for the full branch list.
 const getClient = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const client = await Client.findOne({ id }).lean();
+    const allBranches = await Client.find({ id }).lean();
 
-    if (!client) {
+    if (allBranches.length === 0) {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    const hasValidCoordinates =
-      client.location &&
-      Number.isFinite(Number(client.location.latitude)) &&
-      Number.isFinite(Number(client.location.longitude));
+    if (allBranches.length === 1) {
+      return res.status(200).json(buildClientResponse(allBranches[0]));
+    }
 
-    res.status(200).json({
-      ...client,
-      googleMapsLink: hasValidCoordinates
-        ? `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`
-        : "",
+    // Chain client — return all sedes so the caller can present a picker.
+    return res.status(200).json({
+      esCadena: true,
+      id,
+      nombre: allBranches[0].nombre,
+      totalSedes: allBranches.length,
+      sedes: allBranches.map(buildClientResponse),
     });
   } catch (err) {
     console.log("Error obteniendo cliente:", err);
@@ -68,15 +89,41 @@ const getClient = async (req, res) => {
   }
 };
 
+// Returns all branches (sedes) of a chain client by ID.
+const getClientBranches = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const branches = await Client.find({ id }).lean();
+
+    if (branches.length === 0) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    return res.status(200).json({
+      id,
+      nombre: branches[0].nombre,
+      totalSedes: branches.length,
+      esCadena: branches.length > 1,
+      sedes: branches.map(buildClientResponse),
+    });
+  } catch (err) {
+    console.log("Error obteniendo sedes:", err);
+    res.status(500).json({ message: "Error getting client branches" });
+  }
+};
+
 const deleteClient = async (req, res) => {
   try {
     const { id } = req.params;
+    const { sucursal } = req.query;
 
     if (!id) {
       return res.status(400).json({ message: "Client ID is required" });
     }
 
-    const deletedClient = await Client.findOneAndDelete({ id });
+    const query = sucursal !== undefined ? { id, sucursal: String(sucursal).trim() } : { id };
+    const deletedClient = await Client.findOneAndDelete(query);
 
     if (!deletedClient) {
       return res.status(404).json({ message: "Client not found" });
@@ -178,6 +225,7 @@ module.exports = {
   registerClient,
   countClients,
   getClient,
+  getClientBranches,
   deleteClient,
   createClientLocationReport,
   listClientLocationReports,
