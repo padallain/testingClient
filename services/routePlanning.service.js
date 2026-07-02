@@ -95,17 +95,18 @@ const normalizeRequestedStops = ({ ids, stops }) => {
 
   normalizedStops.forEach((rawStop) => {
     const clientId = String(rawStop?.clientId ?? rawStop?.id ?? "").trim();
+    if (!clientId) return;
 
-    if (!clientId) {
-      return;
-    }
+    const sucursal = typeof rawStop?.sucursal === "string" ? rawStop.sucursal.trim() : "";
+    // Two branches of the same chain are different stops — key includes sucursal
+    const stopKey = sucursal ? `${clientId}|${sucursal}` : clientId;
 
-    if (aggregatedStops.has(clientId)) {
+    if (aggregatedStops.has(stopKey)) {
       duplicateClientIds.push(clientId);
       return;
     }
 
-    aggregatedStops.set(clientId, { clientId });
+    aggregatedStops.set(stopKey, { clientId, sucursal });
   });
 
   return {
@@ -523,7 +524,8 @@ const calculateRouteDistance = async (route) => {
 const buildRouteArtifacts = (route) => {
   const response = route.map((client) => ({
     id: client.id,
-    nombre: client.nombre,
+    nombre: client.sucursal ? `${client.nombre} — ${client.sucursal}` : client.nombre,
+    sucursal: client.sucursal || "",
     weight: client.weight,
     location: client.location,
     googleMapsLink: `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`,

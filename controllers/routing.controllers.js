@@ -340,11 +340,30 @@ const makeRoute = async (req, res) => {
       return res.status(400).json({ message: "At least one valid client ID is required" });
     }
 
-    const uniqueIds = uniqueStops.map((stop) => stop.clientId);
-    const clients = await Client.find({ id: { $in: uniqueIds } }).lean();
+    // Query each stop individually so branch clients fetch only the selected sede
+    const clientQueryConditions = uniqueStops.map((stop) =>
+      stop.sucursal
+        ? { id: stop.clientId, sucursal: stop.sucursal }
+        : { id: stop.clientId },
+    );
+    const clients = await Client.find({ $or: clientQueryConditions }).lean();
 
-    const foundIds = clients.map((client) => client.id);
-    const { notFoundIds, notFoundClients } = buildMissingClients(uniqueIds, foundIds);
+    // Detect missing stops using (id + sucursal) as the compound key
+    const foundStopKeys = new Set(
+      clients.map((c) => (c.sucursal ? `${c.id}|${c.sucursal}` : c.id)),
+    );
+    const notFoundClients = uniqueStops
+      .filter((stop) => {
+        const key = stop.sucursal ? `${stop.clientId}|${stop.sucursal}` : stop.clientId;
+        return !foundStopKeys.has(key);
+      })
+      .map((stop) => ({
+        clientId: stop.sucursal ? `${stop.clientId} (${stop.sucursal})` : stop.clientId,
+        resolved: false,
+        resolvedAt: null,
+      }));
+    const notFoundIds = notFoundClients.map((c) => c.clientId);
+    const uniqueIds = uniqueStops.map((stop) => stop.clientId);
     const routeOptions = await buildRouteOptions(clients, { anchorClientId: anchorClientId || undefined });
 
     if (routeOptions.length < 1) {
