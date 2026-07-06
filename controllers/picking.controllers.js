@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const PickingReport = require('../models/pickingReport.model');
+const PickingErrorReport = require('../models/pickingErrorReport.model');
 
 function normalizeResponsibleId(value) {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
@@ -12,6 +13,10 @@ function normalizeOrderNumber(value) {
 function parsePositiveInteger(value) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function parseDateRange(query = {}) {
@@ -152,7 +157,29 @@ async function getPickingSummary(req, res) {
       PickingReport.find(matchStage).sort({ fechaHoraRegistro: -1 }).lean(),
     ]);
 
+    const orderNumbers = details
+      .map((report) => normalizeOrderNumber(report?.numeroPedido))
+      .filter(Boolean);
+    const errorRanking = orderNumbers.length
+      ? await PickingErrorReport.aggregate([
+          {
+            $match: {
+              numeroPedido: { $in: orderNumbers },
+            },
+          },
+          {
+            $group: {
+              _id: '$responsableId',
+              totalErrores: { $sum: 1 },
+            },
+          },
+          { $sort: { totalErrores: -1, _id: 1 } },
+        ])
+      : [];
+
     const totalsRow = totals[0] || { totalPedidos: 0, totalCajas: 0, responsablesActivos: [] };
+    const errorMap = new Map(errorRanking.map((item) => [item._id, item.totalErrores]));
+    const totalErrores = errorRanking.reduce((sum, item) => sum + (Number(item.totalErrores) || 0), 0);
 
     return res.status(200).json({
       filtro: {
@@ -162,6 +189,7 @@ async function getPickingSummary(req, res) {
       resumen: {
         totalPedidos: totalsRow.totalPedidos || 0,
         totalCajas: totalsRow.totalCajas || 0,
+        totalErrores,
         responsablesActivos: Array.isArray(totalsRow.responsablesActivos) ? totalsRow.responsablesActivos.length : 0,
         responsableConMasPicking: topWorker[0]
           ? {
@@ -170,11 +198,18 @@ async function getPickingSummary(req, res) {
               totalCajas: topWorker[0].totalCajas,
             }
           : null,
+        responsableConMasErrores: errorRanking[0]
+          ? {
+              responsableId: errorRanking[0]._id,
+              totalErrores: errorRanking[0].totalErrores,
+            }
+          : null,
       },
       ranking: ranking.map((item) => ({
         responsableId: item._id,
         totalPedidos: item.totalPedidos,
         totalCajas: item.totalCajas,
+        totalErrores: errorMap.get(item._id) || 0,
       })),
       reportes: details,
     });
@@ -207,9 +242,75 @@ async function getPickingReportById(req, res) {
   }
 }
 
+async function getPickingReportByOrderNumber(req, res) {
+  try {
+    const numeroPedido = normalizeOrderNumber(req.params?.numeroPedido || req.query?.numeroPedido);
+
+    if (!numeroPedido) {
+      return res.status(400).json({ message: 'El numero de pedido es obligatorio.' });
+    }
+
+    const report = await PickingReport.findOne({ numeroPedido }).lean();
+
+    if (!report) {
+      return res.status(404).json({ message: 'No se encontro un picking para ese pedido.' });
+    }
+
+    const totalErrores = await PickingErrorReport.countDocuments({ numeroPedido });
+
+    return res.status(200).json({
+      report: {
+        ...report,
+        totalErrores,
+      },
+    });
+  } catch (error) {
+    console.error('Error consultando picking por numero de pedido:', error);
+    return res.status(500).json({ message: 'Error consultando el picking por pedido.' });
+  }
+}
+
+async function createPickingErrorReport(req, res) {
+  try {
+    const numeroPedido = normalizeOrderNumber(req.params?.numeroPedido || req.body?.numeroPedido);
+    const tipoError = normalizeText(req.body?.tipoError);
+    const descripcion = normalizeText(req.body?.descripcion);
+
+    if (!numeroPedido || !tipoError || !descripcion) {
+      return res.status(400).json({ message: 'numeroPedido, tipoError y descripcion son obligatorios.' });
+    }
+
+    const pickingReport = await PickingReport.findOne({ numeroPedido });
+
+    if (!pickingReport) {
+      return res.status(404).json({ message: 'No se encontro un picking para ese pedido.' });
+    }
+
+    const errorReport = await PickingErrorReport.create({
+      pickingReportId: pickingReport._id,
+      numeroPedido: pickingReport.numeroPedido,
+      responsableId: pickingReport.responsableId,
+      numeroCajas: pickingReport.numeroCajas,
+      tipoError,
+      descripcion,
+    });
+
+    return res.status(201).json({
+      message: 'Reporte de error de picking guardado correctamente.',
+      errorReport,
+      report: pickingReport,
+    });
+  } catch (error) {
+    console.error('Error guardando reporte de error de picking:', error);
+    return res.status(500).json({ message: 'Error guardando el reporte de error de picking.' });
+  }
+}
+
 module.exports = {
   createPickingReport,
   listRecentPickingReports,
   getPickingSummary,
   getPickingReportById,
+  getPickingReportByOrderNumber,
+  createPickingErrorReport,
 };

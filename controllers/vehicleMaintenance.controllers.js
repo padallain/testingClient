@@ -104,6 +104,7 @@ const listUpcomingVehicleMaintenance = async (req, res) => {
 
     const records = await VehicleMaintenance.find({
       fechaProximoServicio: { $ne: null },
+      estado: { $ne: "completado" },
     })
       .sort({ fechaProximoServicio: 1, placa: 1, createdAt: -1 })
       .limit(limit)
