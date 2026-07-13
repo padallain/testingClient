@@ -5,6 +5,24 @@ const START_ID = "317554345";
 const MAX_WAYPOINTS = 10;
 const OPENROUTESERVICE_API_KEY = process.env.OPENROUTESERVICE_API_KEY || process.env.ORS_API_KEY || "";
 const OPENROUTESERVICE_MATRIX_URL = "https://api.openrouteservice.org/v2/matrix/driving-car";
+const CABIMAS_BOUNDS = {
+  minLatitude: 10.36,
+  maxLatitude: 10.47,
+  minLongitude: -71.46,
+  maxLongitude: -71.34,
+};
+const CABIMAS_ENTRY_WAYPOINTS = [
+  {
+    id: "cabimas-lara-zulia",
+    nombre: "Corredor Lara-Zulia",
+    location: { latitude: 10.41067, longitude: -71.36694 },
+  },
+  {
+    id: "cabimas-calle-h",
+    nombre: "Entrada Calle H",
+    location: { latitude: 10.41486, longitude: -71.41803 },
+  },
+];
 
 const ROUTE_TYPE_META = {
   closest: {
@@ -53,6 +71,18 @@ const toCoordinateTuple = (location) => [
   Number(location.longitude),
   Number(location.latitude),
 ];
+
+const isLocationWithinBounds = (location, bounds) => {
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
+
+  return Number.isFinite(latitude)
+    && Number.isFinite(longitude)
+    && latitude >= bounds.minLatitude
+    && latitude <= bounds.maxLatitude
+    && longitude >= bounds.minLongitude
+    && longitude <= bounds.maxLongitude;
+};
 
 const normalizeWeight = (value) => {
   const numericValue = Number(value);
@@ -160,6 +190,24 @@ const buildRoundTripCoordinates = (route) => {
   }
 
   return coordinates;
+};
+
+const buildRoutePathPoints = (route) => {
+  if (!Array.isArray(route) || route.length === 0) {
+    return [];
+  }
+
+  const firstCabimasStopIndex = route.findIndex((client) => isLocationWithinBounds(client?.location, CABIMAS_BOUNDS));
+
+  if (firstCabimasStopIndex === -1) {
+    return route;
+  }
+
+  return [
+    ...route.slice(0, firstCabimasStopIndex),
+    ...CABIMAS_ENTRY_WAYPOINTS,
+    ...route.slice(firstCabimasStopIndex),
+  ];
 };
 
 const buildIndexedClients = (clients, anchorId) => {
@@ -522,6 +570,7 @@ const calculateRouteDistance = async (route) => {
 };
 
 const buildRouteArtifacts = (route) => {
+  const routePathPoints = buildRoutePathPoints(route);
   const response = route.map((client) => ({
     id: client.id,
     nombre: client.sucursal ? `${client.nombre} — ${client.sucursal}` : client.nombre,
@@ -534,9 +583,9 @@ const buildRouteArtifacts = (route) => {
   const googleMapsRouteLinks = [];
   let startPoint = `${ORIGIN.latitude},${ORIGIN.longitude}`;
 
-  for (let i = 0; i < route.length; i += MAX_WAYPOINTS - 1) {
-    const segment = route.slice(i, i + (MAX_WAYPOINTS - 1));
-    const isLastSegment = i + (MAX_WAYPOINTS - 1) >= route.length;
+  for (let i = 0; i < routePathPoints.length; i += MAX_WAYPOINTS - 1) {
+    const segment = routePathPoints.slice(i, i + (MAX_WAYPOINTS - 1));
+    const isLastSegment = i + (MAX_WAYPOINTS - 1) >= routePathPoints.length;
     const waypoints = [
       startPoint,
       ...segment.map((client) => `${client.location.latitude},${client.location.longitude}`),
@@ -550,7 +599,7 @@ const buildRouteArtifacts = (route) => {
     }
   }
 
-  const coordinates = buildRoundTripCoordinates(route);
+  const coordinates = buildRoundTripCoordinates(routePathPoints);
   const aParam = coordinates.map(([lng, lat]) => `${lat},${lng}`).join(",");
   const first = coordinates[0];
   const openRouteLink = `https://maps.openrouteservice.org/directions?n1=${first[1]}&n2=${first[0]}&a=${aParam}&b=0&c=0&k1=en-US&k2=km`;
