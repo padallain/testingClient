@@ -83,15 +83,20 @@ const normalizeWeight = (value) => {
   return numericValue;
 };
 
-const buildRouteLabel = (driverId, requestedLabel) => {
-  const normalizedLabel = typeof requestedLabel === "string" ? requestedLabel.trim() : "";
+const buildRouteLabel = ({ routeId, driverId, requestedLabel }) => {
+  const normalizedRouteId = String(routeId || "").trim();
 
-  if (normalizedLabel) {
-    return normalizedLabel;
+  if (normalizedRouteId) {
+    return `RUTA-${normalizedRouteId}`;
   }
 
-  const dateTag = new Date().toISOString().slice(0, 10);
-  return `Ruta ${driverId} ${dateTag}`;
+  const normalizedDriverId = String(driverId || "SIN_CHOFER").trim() || "SIN_CHOFER";
+  const normalizedLabel = typeof requestedLabel === "string" ? requestedLabel.trim() : "";
+  const dateTag = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+
+  return normalizedLabel
+    ? `RUTA-${normalizedDriverId}-${dateTag}-${normalizedLabel.replace(/\s+/g, "-").toUpperCase()}`
+    : `RUTA-${normalizedDriverId}-${dateTag}`;
 };
 
 const normalizeRequestedStops = ({ ids, stops }) => {

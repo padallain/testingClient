@@ -408,7 +408,7 @@ const makeRoute = async (req, res) => {
       const assignment = new RouteAssignment({
         driverId: normalizedDriverId,
         driverName: typeof driverName === "string" ? driverName.trim() : "",
-        routeLabel: buildRouteLabel(normalizedDriverId, routeLabel),
+        routeLabel: buildRouteLabel({ driverId: normalizedDriverId, requestedLabel: routeLabel }),
         routeType: selectedRouteOption.type,
         routeTypeLabel: selectedRouteOption.label,
         uniqueClientCount,
@@ -426,6 +426,12 @@ const makeRoute = async (req, res) => {
         stops: assignmentStops,
         originalStops: recommendedAssignmentStops,
         missingClients: notFoundClients,
+      });
+
+      assignment.routeLabel = buildRouteLabel({
+        routeId: assignment._id,
+        driverId: normalizedDriverId,
+        requestedLabel: routeLabel,
       });
 
       await assignment.save();
