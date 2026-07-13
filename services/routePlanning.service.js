@@ -11,18 +11,7 @@ const CABIMAS_BOUNDS = {
   minLongitude: -71.46,
   maxLongitude: -71.34,
 };
-const CABIMAS_ENTRY_WAYPOINTS = [
-  {
-    id: "cabimas-lara-zulia",
-    nombre: "Corredor Lara-Zulia",
-    location: { latitude: 10.41067, longitude: -71.36694 },
-  },
-  {
-    id: "cabimas-calle-h",
-    nombre: "Entrada Calle H",
-    location: { latitude: 10.41486, longitude: -71.41803 },
-  },
-];
+const CABIMAS_ROUTE_ORIGIN = { latitude: 10.435931, longitude: -71.399238 };
 
 const ROUTE_TYPE_META = {
   closest: {
@@ -179,36 +168,23 @@ const splitStartClient = (clients, anchorId) => {
   };
 };
 
-const buildRoundTripCoordinates = (route) => {
+const buildRoundTripCoordinates = (route, origin = ORIGIN) => {
   const coordinates = [
-    [ORIGIN.longitude, ORIGIN.latitude],
+    [origin.longitude, origin.latitude],
     ...route.map((client) => toCoordinateTuple(client.location)),
   ];
 
   if (route.length > 0) {
-    coordinates.push([ORIGIN.longitude, ORIGIN.latitude]);
+    coordinates.push([origin.longitude, origin.latitude]);
   }
 
   return coordinates;
 };
 
-const buildRoutePathPoints = (route) => {
-  if (!Array.isArray(route) || route.length === 0) {
-    return [];
-  }
+const routeUsesCabimasOrigin = (route) => Array.isArray(route)
+  && route.some((client) => isLocationWithinBounds(client?.location, CABIMAS_BOUNDS));
 
-  const firstCabimasStopIndex = route.findIndex((client) => isLocationWithinBounds(client?.location, CABIMAS_BOUNDS));
-
-  if (firstCabimasStopIndex === -1) {
-    return route;
-  }
-
-  return [
-    ...route.slice(0, firstCabimasStopIndex),
-    ...CABIMAS_ENTRY_WAYPOINTS,
-    ...route.slice(firstCabimasStopIndex),
-  ];
-};
+const resolveRouteOrigin = (route) => (routeUsesCabimasOrigin(route) ? CABIMAS_ROUTE_ORIGIN : ORIGIN);
 
 const buildIndexedClients = (clients, anchorId) => {
   const clientsWithCoordinates = getClientsWithCoordinates(clients);
@@ -234,8 +210,8 @@ const buildIndexedClients = (clients, anchorId) => {
 
 const stripMatrixIndex = (route) => route.map(({ matrixIndex, ...client }) => client);
 
-const buildGeodesicDistanceMatrix = (indexedClients) => {
-  const nodes = [{ location: ORIGIN }, ...indexedClients];
+const buildGeodesicDistanceMatrix = (indexedClients, origin = ORIGIN) => {
+  const nodes = [{ location: origin }, ...indexedClients];
 
   return nodes.map((fromNode) => nodes.map((toNode) => {
     if (fromNode === toNode) {
@@ -270,7 +246,7 @@ const normalizeRoadDistanceMatrix = (distances, expectedLength) => {
   return normalizedMatrix.every(Boolean) ? normalizedMatrix : null;
 };
 
-const fetchRoadDistanceMatrix = async (indexedClients) => {
+const fetchRoadDistanceMatrix = async (indexedClients, origin = ORIGIN) => {
   if (!OPENROUTESERVICE_API_KEY || indexedClients.length === 0) {
     return null;
   }
@@ -280,7 +256,7 @@ const fetchRoadDistanceMatrix = async (indexedClients) => {
       OPENROUTESERVICE_MATRIX_URL,
       {
         locations: [
-          [ORIGIN.longitude, ORIGIN.latitude],
+          [origin.longitude, origin.latitude],
           ...indexedClients.map((client) => toCoordinateTuple(client.location)),
         ],
         metrics: ["distance"],
@@ -417,13 +393,13 @@ const buildAlphabeticalRoute = (indexedClients) => {
   return fixedStart ? [fixedStart, ...sortedClients] : sortedClients;
 };
 
-const calculateRouteDistanceFallback = (route) => {
+const calculateRouteDistanceFallback = (route, origin = ORIGIN) => {
   if (!Array.isArray(route) || route.length === 0) {
     return 0;
   }
 
   let totalDistance = 0;
-  let previousPoint = ORIGIN;
+  let previousPoint = origin;
 
   route.forEach((client) => {
     totalDistance += calculateDistance(
@@ -438,8 +414,8 @@ const calculateRouteDistanceFallback = (route) => {
   totalDistance += calculateDistance(
     previousPoint.latitude,
     previousPoint.longitude,
-    ORIGIN.latitude,
-    ORIGIN.longitude,
+    origin.latitude,
+    origin.longitude,
   );
 
   return toRoundedDistance(totalDistance);
@@ -447,6 +423,7 @@ const calculateRouteDistanceFallback = (route) => {
 
 const buildRouteContext = async (clients, options = {}) => {
   const { startClient, indexedClients } = buildIndexedClients(clients, options.anchorClientId);
+  const routeOrigin = resolveRouteOrigin(indexedClients);
 
   if (indexedClients.length === 0) {
     return {
@@ -454,16 +431,18 @@ const buildRouteContext = async (clients, options = {}) => {
       indexedClients,
       distanceMatrix: [],
       distanceSource: "none",
+      routeOrigin,
     };
   }
 
-  const roadDistanceMatrix = await fetchRoadDistanceMatrix(indexedClients);
+  const roadDistanceMatrix = await fetchRoadDistanceMatrix(indexedClients, routeOrigin);
 
   return {
     startClient,
     indexedClients,
-    distanceMatrix: roadDistanceMatrix || buildGeodesicDistanceMatrix(indexedClients),
+    distanceMatrix: roadDistanceMatrix || buildGeodesicDistanceMatrix(indexedClients, routeOrigin),
     distanceSource: roadDistanceMatrix ? "road" : "geodesic",
+    routeOrigin,
   };
 };
 
@@ -557,20 +536,20 @@ const calculateRouteDistance = async (route) => {
     return 0;
   }
 
-  const { indexedClients, distanceMatrix } = await buildRouteContext(route.map((client, index) => ({
+  const { indexedClients, distanceMatrix, routeOrigin } = await buildRouteContext(route.map((client, index) => ({
     ...client,
     id: String(client.id || client.clientId || `route-stop-${index + 1}`),
   })));
 
   if (indexedClients.length !== route.length) {
-    return calculateRouteDistanceFallback(route);
+    return calculateRouteDistanceFallback(route, routeOrigin);
   }
 
   return toRoundedDistance(calculateClosedRouteDistanceFromMatrix(indexedClients, distanceMatrix));
 };
 
 const buildRouteArtifacts = (route) => {
-  const routePathPoints = buildRoutePathPoints(route);
+  const routeOrigin = resolveRouteOrigin(route);
   const response = route.map((client) => ({
     id: client.id,
     nombre: client.sucursal ? `${client.nombre} — ${client.sucursal}` : client.nombre,
@@ -581,15 +560,15 @@ const buildRouteArtifacts = (route) => {
   }));
 
   const googleMapsRouteLinks = [];
-  let startPoint = `${ORIGIN.latitude},${ORIGIN.longitude}`;
+  let startPoint = `${routeOrigin.latitude},${routeOrigin.longitude}`;
 
-  for (let i = 0; i < routePathPoints.length; i += MAX_WAYPOINTS - 1) {
-    const segment = routePathPoints.slice(i, i + (MAX_WAYPOINTS - 1));
-    const isLastSegment = i + (MAX_WAYPOINTS - 1) >= routePathPoints.length;
+  for (let i = 0; i < route.length; i += MAX_WAYPOINTS - 1) {
+    const segment = route.slice(i, i + (MAX_WAYPOINTS - 1));
+    const isLastSegment = i + (MAX_WAYPOINTS - 1) >= route.length;
     const waypoints = [
       startPoint,
       ...segment.map((client) => `${client.location.latitude},${client.location.longitude}`),
-      ...(isLastSegment ? [`${ORIGIN.latitude},${ORIGIN.longitude}`] : []),
+      ...(isLastSegment ? [`${routeOrigin.latitude},${routeOrigin.longitude}`] : []),
     ].join("/");
     googleMapsRouteLinks.push(`https://www.google.com/maps/dir/${waypoints}`);
 
@@ -599,7 +578,7 @@ const buildRouteArtifacts = (route) => {
     }
   }
 
-  const coordinates = buildRoundTripCoordinates(routePathPoints);
+  const coordinates = buildRoundTripCoordinates(route, routeOrigin);
   const aParam = coordinates.map(([lng, lat]) => `${lat},${lng}`).join(",");
   const first = coordinates[0];
   const openRouteLink = `https://maps.openrouteservice.org/directions?n1=${first[1]}&n2=${first[0]}&a=${aParam}&b=0&c=0&k1=en-US&k2=km`;
