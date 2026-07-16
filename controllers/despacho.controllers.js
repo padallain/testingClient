@@ -11,6 +11,7 @@ exports.calculateDespacho = async (req, res) => {
     const zonas = Array.isArray(req.body?.zonas) ? req.body.zonas : [];
     const costoExternoReferencia = Number(req.body?.costo_externo_referencia) || 0;
     const vehiculos = req.body?.vehiculos;
+    const configZonas = req.body?.configZonas;
     const zonasNormalizadas = normalizeZones(zonas);
 
     if (!zonasNormalizadas.length) {
@@ -21,6 +22,7 @@ exports.calculateDespacho = async (req, res) => {
       zonas: zonasNormalizadas,
       costoExternoReferencia,
       vehiculos,
+      configZonas,
     });
 
     const saved = await Despacho.create(result);

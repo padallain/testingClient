@@ -61,7 +61,7 @@ exports.getDispatchPage = (req, res) => {
 
 exports.calculateDispatch = (req, res) => {
   try {
-    const { zonas, costoExterno, vehiculos } = req.body || {};
+    const { zonas, costoExterno, vehiculos, configZonas } = req.body || {};
 
     if (!zonas || typeof zonas !== 'object') {
       return res.status(400).json({ error: 'Se requiere el objeto "zonas"' });
@@ -78,6 +78,7 @@ exports.calculateDispatch = (req, res) => {
       zonas: normalizedZones,
       costoExternoReferencia: externalCost,
       vehiculos,
+      configZonas,
     });
 
     const asignaciones = buildLegacyAssignments(result, externalCost);

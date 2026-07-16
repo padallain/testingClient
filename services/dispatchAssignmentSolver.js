@@ -5,6 +5,13 @@
  * cotas admisibles, en vez de fuerza bruta sobre particiones de zonas
  * pre-enumeradas a mano con una función de score de exponentes gigantes.
  *
+ * Este motor es agnóstico de ciudad: no conoce nombres de zona. Toda regla
+ * de negocio específica (qué zonas son prioritarias, cuáles van dedicadas,
+ * cuáles no pueden usar camioneta, qué pares de zonas no pueden compartir
+ * vehículo) entra como parámetro (ver `solveDispatchAssignment`) — quien
+ * llama (hoy `optimizador.js`, con un default para Maracaibo) decide esas
+ * reglas, no este archivo.
+ *
  * Contenedores disponibles para cada zona:
  *   - un grupo respaldado por una camioneta propia (costo marginal 0,
  *     oferta limitada al tamaño de flota, capacidad limitada),
@@ -23,8 +30,8 @@
  *
  * El criterio de selección es una comparación lexicográfica de 3 niveles
  * (en vez de un solo score con coeficientes 1e12/1e13 sin justificar):
- *   1) minimizar el peso de prioridad de zonas NORTE/OESTE/SUR/CENTRO que
- *      quedan pospuestas,
+ *   1) minimizar el peso de prioridad (configurable por zona) que queda
+ *      pospuesto,
  *   2) maximizar el valor neto despachado hoy en dólares reales (valor de
  *      zonas no pospuestas, menos el costo real de los grupos externos
  *      efectivamente usados),
@@ -38,10 +45,6 @@
  * hasta el momento.
  */
 
-const PRIORITY_ZONE_SET = new Set(['NORTE', 'OESTE', 'SUR', 'CENTRO']);
-// OJEDA solo puede compartir vehículo con estas zonas (nunca con NORTE,
-// SUR, CENTRO, OESTE, ni con ninguna otra fuera de este conjunto).
-const OJEDA_ALLOWED_PARTNERS = new Set(['CABIMAS', 'MENEGRANDE', 'BACHAQUERO']);
 const EXTERNAL_CAPACITY_KG = 5000;
 const EXTERNAL_CAPACITY_CLIENTES = Number.MAX_SAFE_INTEGER;
 const MAX_EXTERNAL_GROUPS = 10;
@@ -52,47 +55,24 @@ const VALUE_EPSILON = 1e-6;
 const MAX_NODES = 4_000_000;
 const MAX_TIME_MS = 5000;
 
-/**
- * Réplica exacta de la regla geográfica original: qué combinaciones de
- * zonas prioritarias pueden compartir un mismo vehículo. NORTE+SUR no
- * puede combinarse con CENTRO ni con OESTE; CENTRO+OESTE solo puede
- * combinarse si además viaja exactamente una de {NORTE, SUR}.
- */
-function isValidPriorityGroup(prioritySubset) {
-  if (prioritySubset.length <= 1) return true;
-
-  const set = new Set(prioritySubset);
-  const hasNorth = set.has('NORTE');
-  const hasSouth = set.has('SUR');
-  const hasCentro = set.has('CENTRO');
-  const hasOeste = set.has('OESTE');
-
-  if (prioritySubset.length === 2) {
-    return (
-      (hasNorth && hasCentro) ||
-      (hasNorth && hasOeste) ||
-      (hasNorth && hasSouth) ||
-      (hasSouth && hasCentro) ||
-      (hasSouth && hasOeste)
-    );
-  }
-
-  if (prioritySubset.length === 3) {
-    return hasCentro && hasOeste && hasNorth !== hasSouth;
-  }
-
-  return false;
+function pairKey(zoneA, zoneB) {
+  return zoneA < zoneB ? `${zoneA}|${zoneB}` : `${zoneB}|${zoneA}`;
 }
 
-/**
- * OJEDA solo puede combinarse con CABIMAS, MENEGRANDE y BACHAQUERO. Si el
- * grupo (incluyendo al candidato) contiene OJEDA, todas las demás zonas de
- * ese grupo deben pertenecer a OJEDA_ALLOWED_PARTNERS.
- */
-function isOjedaCompatible(existingZones, candidateZone) {
-  const allZones = [...existingZones, candidateZone];
-  if (!allZones.includes('OJEDA')) return true;
-  return allZones.every((name) => name === 'OJEDA' || OJEDA_ALLOWED_PARTNERS.has(name));
+/** Construye un Set de claves canónicas a partir de pares [zonaA, zonaB]. */
+function buildIncompatibilitySet(pairs) {
+  const set = new Set();
+  for (const pair of pairs || []) {
+    if (Array.isArray(pair) && pair.length === 2 && pair[0] && pair[1] && pair[0] !== pair[1]) {
+      set.add(pairKey(pair[0], pair[1]));
+    }
+  }
+  return set;
+}
+
+/** ¿Puede `candidateZone` compartir vehículo con `existingZones`? */
+function isCompatibleWithGroup(existingZones, candidateZone, incompatiblePairs) {
+  return !existingZones.some((name) => incompatiblePairs.has(pairKey(name, candidateZone)));
 }
 
 function capacityFor(tipo, context) {
@@ -115,16 +95,11 @@ function canJoinGroup(group, zone, context) {
   }
   if (context.dedicatedZones.has(zone.nombre)) return false; // zona dedicada: nunca comparte vehículo
   if (group.zonas.some((name) => context.dedicatedZones.has(name))) return false;
-  if (!isOjedaCompatible(group.zonas, zone.nombre)) return false;
+  if (!isCompatibleWithGroup(group.zonas, zone.nombre, context.incompatiblePairs)) return false;
 
   const cap = capacityFor(group.tipo, context);
   if (group.kg + zone.kg > cap.kg) return false;
   if (group.clientes + zone.clientes > cap.clientes) return false;
-
-  if (PRIORITY_ZONE_SET.has(zone.nombre)) {
-    const prioritySubset = group.zonas.filter((name) => PRIORITY_ZONE_SET.has(name)).concat(zone.nombre);
-    if (prioritySubset.length > 1 && !isValidPriorityGroup(prioritySubset)) return false;
-  }
 
   return true;
 }
@@ -148,11 +123,18 @@ function cloneGroups(groups) {
 
 /**
  * Resuelve la asignación óptima de `zones` a camionetas/camiones/externo/
- * mañana. `fleet` = { camionetas: [...disponibles], camiones: [...] },
- * cada vehículo con { capacidadKg, capacidadClientes }. Todas las
- * camionetas (y todos los camiones) deben tener la misma capacidad entre
- * sí; si la flota tiene capacidades heterogéneas, se usa la más pequeña
- * como cota conservadora (ver nota en optimizador.js).
+ * mañana.
+ *
+ * Parámetros de reglas de negocio (todos configurables por quien llama,
+ * este módulo no asume ninguna zona en particular):
+ *   - priorityWeights: Map(nombreZona -> peso). Peso 0 o ausente = zona
+ *     no prioritaria (nunca bloquea la etapa 1 de la comparación).
+ *   - dedicatedZones: Set(nombreZona) que nunca comparte vehículo con
+ *     ninguna otra zona (viaja siempre sola).
+ *   - vanRestrictedZones: Set(nombreZona) que no puede usar camioneta.
+ *   - incompatiblePairs: Set de claves canónicas "a|b" (usar
+ *     buildIncompatibilitySet) — pares de zonas que no pueden compartir
+ *     vehículo entre sí.
  */
 function solveDispatchAssignment({
   zones,
@@ -164,6 +146,7 @@ function solveDispatchAssignment({
   priorityWeights,
   dedicatedZones,
   vanRestrictedZones,
+  incompatiblePairs,
 }) {
   if (!zones.length) {
     return {
@@ -189,6 +172,7 @@ function solveDispatchAssignment({
     camionCapacity: { kg: camionCapacity.kg, clientes: camionCapacity.clientes },
     dedicatedZones,
     vanRestrictedZones,
+    incompatiblePairs: incompatiblePairs || new Set(),
   };
 
   const maxExternalGroups = Math.min(orderedZones.length, MAX_EXTERNAL_GROUPS);
@@ -346,5 +330,5 @@ function solveDispatchAssignment({
 
 module.exports = {
   solveDispatchAssignment,
-  isValidPriorityGroup,
+  buildIncompatibilitySet,
 };
