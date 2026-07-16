@@ -136,7 +136,13 @@ function isBetterTuple(candidate, incumbent) {
 }
 
 function cloneGroups(groups) {
-  return groups.map((g) => ({ tipo: g.tipo, zonas: [...g.zonas], kg: g.kg, clientes: g.clientes }));
+  return groups.map((group) => ({
+    tipo: group.tipo,
+    vehicleId: group.vehicleId,
+    zonas: [...group.zonas],
+    kg: group.kg,
+    clientes: group.clientes,
+  }));
 }
 
 /**
