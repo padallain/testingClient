@@ -39,6 +39,9 @@
  */
 
 const PRIORITY_ZONE_SET = new Set(['NORTE', 'OESTE', 'SUR', 'CENTRO']);
+// OJEDA solo puede compartir vehículo con estas zonas (nunca con NORTE,
+// SUR, CENTRO, OESTE, ni con ninguna otra fuera de este conjunto).
+const OJEDA_ALLOWED_PARTNERS = new Set(['CABIMAS', 'MENEGRANDE', 'BACHAQUERO']);
 const EXTERNAL_CAPACITY_KG = 5000;
 const EXTERNAL_CAPACITY_CLIENTES = Number.MAX_SAFE_INTEGER;
 const MAX_EXTERNAL_GROUPS = 10;
@@ -81,6 +84,17 @@ function isValidPriorityGroup(prioritySubset) {
   return false;
 }
 
+/**
+ * OJEDA solo puede combinarse con CABIMAS, MENEGRANDE y BACHAQUERO. Si el
+ * grupo (incluyendo al candidato) contiene OJEDA, todas las demás zonas de
+ * ese grupo deben pertenecer a OJEDA_ALLOWED_PARTNERS.
+ */
+function isOjedaCompatible(existingZones, candidateZone) {
+  const allZones = [...existingZones, candidateZone];
+  if (!allZones.includes('OJEDA')) return true;
+  return allZones.every((name) => name === 'OJEDA' || OJEDA_ALLOWED_PARTNERS.has(name));
+}
+
 function capacityFor(tipo, context) {
   if (tipo === 'camioneta') return context.camionetaCapacity;
   if (tipo === 'camion') return context.camionCapacity;
@@ -88,7 +102,7 @@ function capacityFor(tipo, context) {
 }
 
 function canOpenGroup(tipo, zone, context) {
-  if (tipo === 'camioneta' && (context.soloTruckZones.has(zone.nombre) || context.vanRestrictedZones.has(zone.nombre))) {
+  if (tipo === 'camioneta' && context.vanRestrictedZones.has(zone.nombre)) {
     return false;
   }
   const cap = capacityFor(tipo, context);
@@ -96,11 +110,12 @@ function canOpenGroup(tipo, zone, context) {
 }
 
 function canJoinGroup(group, zone, context) {
-  if (group.tipo === 'camioneta' && (context.soloTruckZones.has(zone.nombre) || context.vanRestrictedZones.has(zone.nombre))) {
+  if (group.tipo === 'camioneta' && context.vanRestrictedZones.has(zone.nombre)) {
     return false;
   }
-  if (context.soloTruckZones.has(zone.nombre)) return false; // camión dedicado: nunca comparte
-  if (group.zonas.some((name) => context.soloTruckZones.has(name))) return false;
+  if (context.dedicatedZones.has(zone.nombre)) return false; // zona dedicada: nunca comparte vehículo
+  if (group.zonas.some((name) => context.dedicatedZones.has(name))) return false;
+  if (!isOjedaCompatible(group.zonas, zone.nombre)) return false;
 
   const cap = capacityFor(group.tipo, context);
   if (group.kg + zone.kg > cap.kg) return false;
@@ -147,7 +162,7 @@ function solveDispatchAssignment({
   camionesCount,
   externalCost,
   priorityWeights,
-  soloTruckZones,
+  dedicatedZones,
   vanRestrictedZones,
 }) {
   if (!zones.length) {
@@ -172,7 +187,7 @@ function solveDispatchAssignment({
   const context = {
     camionetaCapacity: { kg: camionetaCapacity.kg, clientes: camionetaCapacity.clientes },
     camionCapacity: { kg: camionCapacity.kg, clientes: camionCapacity.clientes },
-    soloTruckZones,
+    dedicatedZones,
     vanRestrictedZones,
   };
 

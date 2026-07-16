@@ -5,7 +5,15 @@ const PRIORITY_ZONE_SET = new Set(PRIORITY_ZONE_ORDER);
 const PRIORITY_ZONE_WEIGHTS = { NORTE: 4, OESTE: 3, SUR: 2, CENTRO: 1 };
 const DEFAULT_EXTERNAL_COST = 170;
 const EXTERNAL_RATIO_LIMIT = 0.02;
-const SOLO_TRUCK_ZONES = new Set(['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA']);
+// Zonas "dedicadas": nunca comparten vehículo con ninguna otra zona (van
+// siempre solas). Esto es independiente de qué tipo de vehículo pueden
+// usar — ver VAN_RESTRICTED_ZONES para esa restricción.
+const DEDICATED_ZONES = new Set(['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA']);
+// Zonas que no pueden usar camioneta (deben ir en camión o externo). MARA
+// y MACHIQUES además son dedicadas (DEDICATED_ZONES); PUERTOS y
+// CONCEPCIÓN son dedicadas pero SÍ pueden usar camioneta (se prioriza
+// camioneta para ellas en empates económicos, vía el desempate normal
+// camioneta < camión del solver).
 const VAN_RESTRICTED_ZONES = new Set(['MENEGRANDE', 'MACHIQUES', 'MARA']);
 const KNOWN_ZONE_NAMES = new Map([
   ['SUR', 'SUR'],
@@ -211,13 +219,16 @@ function buildTomorrowItem(unit) {
 
 function buildAssignmentReason(unit, tipo) {
   if (tipo === 'camioneta') {
+    if (unit.zonas.some((zone) => DEDICATED_ZONES.has(zone))) {
+      return 'Camioneta priorizada para zona dedicada (PUERTOS/CONCEPCIÓN) cuando está disponible.';
+    }
     return isPrioritySingleUnit(unit)
       ? 'Camioneta priorizada para zona crítica y atención rápida.'
       : 'Camioneta asignada por tamaño de carga y accesibilidad.';
   }
 
-  if (unit.zonas.some((zone) => SOLO_TRUCK_ZONES.has(zone))) {
-    return 'Zona con restricción dura de camión dedicado.';
+  if (unit.zonas.some((zone) => DEDICATED_ZONES.has(zone))) {
+    return 'Zona dedicada: viaja sola, sin combinar con otras zonas.';
   }
 
   if (unit.zonas.some((zone) => VAN_RESTRICTED_ZONES.has(zone))) {
@@ -385,7 +396,7 @@ function calculateOptimalDispatch({ zonas, costoExternoReferencia, costo_externo
     camionesCount: fleet.camionesDisponibles.length,
     externalCost,
     priorityWeights: new Map(Object.entries(PRIORITY_ZONE_WEIGHTS)),
-    soloTruckZones: SOLO_TRUCK_ZONES,
+    dedicatedZones: DEDICATED_ZONES,
     vanRestrictedZones: VAN_RESTRICTED_ZONES,
   });
 
