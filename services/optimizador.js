@@ -1,3 +1,5 @@
+const { solveDispatchAssignment } = require('./dispatchAssignmentSolver');
+
 const PRIORITY_ZONE_ORDER = ['NORTE', 'OESTE', 'SUR', 'CENTRO'];
 const PRIORITY_ZONE_SET = new Set(PRIORITY_ZONE_ORDER);
 const PRIORITY_ZONE_WEIGHTS = { NORTE: 4, OESTE: 3, SUR: 2, CENTRO: 1 };
@@ -41,7 +43,7 @@ const DEFAULT_FLEET = {
 };
 
 function stripAccents(value) {
-  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
 function normalizeZoneName(value) {
@@ -151,189 +153,6 @@ function isPrioritySingleUnit(unit) {
   return unit.zonas.length === 1 && isPriorityOnlyUnit(unit);
 }
 
-function isValidPriorityGroup(group) {
-  if (group.length === 1) {
-    return true;
-  }
-
-  const set = new Set(group);
-  const hasNorth = set.has('NORTE');
-  const hasSouth = set.has('SUR');
-  const hasCentro = set.has('CENTRO');
-  const hasOeste = set.has('OESTE');
-
-  if (group.length === 2) {
-    return (
-      (hasNorth && hasCentro) ||
-      (hasNorth && hasOeste) ||
-      (hasNorth && hasSouth) ||
-      (hasSouth && hasCentro) ||
-      (hasSouth && hasOeste)
-    );
-  }
-
-  if (group.length === 3) {
-    return hasCentro && hasOeste && (hasNorth !== hasSouth);
-  }
-
-  return false;
-}
-
-function buildPriorityPartitions(zoneMap) {
-  const activePriorityZones = PRIORITY_ZONE_ORDER.filter((zoneName) => zoneMap.has(zoneName));
-
-  if (!activePriorityZones.length) {
-    return [[]];
-  }
-
-  const partitions = [];
-  const seen = new Set();
-
-  function explore(remaining, groups) {
-    if (!remaining.length) {
-      const signature = groups.map((group) => [...group].sort().join('+')).sort().join('|');
-      if (!seen.has(signature)) {
-        seen.add(signature);
-        partitions.push(groups.map((group) => [...group]));
-      }
-      return;
-    }
-
-    const [first, ...rest] = remaining;
-    const candidates = [[first]];
-
-    for (const zoneName of rest) {
-      const pair = [first, zoneName];
-      if (isValidPriorityGroup(pair)) {
-        candidates.push(pair);
-      }
-    }
-
-    if (rest.includes('CENTRO') && rest.includes('OESTE')) {
-      const triple = [first, 'CENTRO', 'OESTE'];
-      if (isValidPriorityGroup(triple)) {
-        candidates.push(triple);
-      }
-    }
-
-    for (const candidate of candidates) {
-      const used = new Set(candidate);
-      const nextRemaining = rest.filter((zoneName) => !used.has(zoneName));
-      explore(nextRemaining, [...groups, candidate]);
-    }
-  }
-
-  explore(activePriorityZones, []);
-  return partitions;
-}
-
-function buildOjedaOptions(zoneMap) {
-  if (!zoneMap.has('OJEDA')) {
-    const singles = [];
-    if (zoneMap.has('MENEGRANDE')) singles.push(['MENEGRANDE']);
-    if (zoneMap.has('BACHAQUERO')) singles.push(['BACHAQUERO']);
-    if (zoneMap.has('CABIMAS')) singles.push(['CABIMAS']);
-    return [singles];
-  }
-
-  const options = [];
-  const baseGroup = ['OJEDA'];
-
-  if (zoneMap.has('MENEGRANDE')) {
-    baseGroup.push('MENEGRANDE');
-  }
-
-  if (zoneMap.has('BACHAQUERO')) {
-    baseGroup.push('BACHAQUERO');
-  }
-
-  options.push([baseGroup, ...(zoneMap.has('CABIMAS') ? [['CABIMAS']] : [])]);
-
-  if (zoneMap.has('CABIMAS')) {
-    options.push([[...baseGroup, 'CABIMAS']]);
-  }
-
-  return options;
-}
-
-function buildOtherSingles(zoneMap) {
-  const reserved = new Set([...PRIORITY_ZONE_ORDER, 'OJEDA', 'MENEGRANDE', 'BACHAQUERO', 'CABIMAS', ...SOLO_TRUCK_ZONES]);
-  const singles = [];
-
-  for (const zoneName of zoneMap.keys()) {
-    if (!reserved.has(zoneName)) {
-      singles.push([zoneName]);
-    }
-  }
-
-  return singles;
-}
-
-function buildPlanOptions(zoneMap) {
-  const dedicatedSingles = [...SOLO_TRUCK_ZONES]
-    .filter((zoneName) => zoneMap.has(zoneName))
-    .map((zoneName) => [zoneName]);
-  const priorityPartitions = buildPriorityPartitions(zoneMap);
-  const ojedaOptions = buildOjedaOptions(zoneMap);
-  const otherSingles = buildOtherSingles(zoneMap);
-  const options = [];
-  const seen = new Set();
-
-  for (const priorityPartition of priorityPartitions) {
-    for (const ojedaGroups of ojedaOptions) {
-      const groups = [...priorityPartition, ...ojedaGroups, ...dedicatedSingles, ...otherSingles].filter((group) => group.length > 0);
-      const signature = groups.map((group) => [...group].sort().join('+')).sort().join('|');
-
-      if (!seen.has(signature)) {
-        seen.add(signature);
-        options.push(groups.map((group) => buildUnit(group, zoneMap)));
-      }
-    }
-  }
-
-  return options;
-}
-
-function canUseVan(unit) {
-  if (unit.zonas.some((zone) => SOLO_TRUCK_ZONES.has(zone) || VAN_RESTRICTED_ZONES.has(zone))) {
-    return false;
-  }
-
-  return unit.kg_total <= 950 && unit.clientes_total <= 40;
-}
-
-function canUseTruck(unit) {
-  return unit.kg_total <= 5000 && unit.clientes_total <= 30;
-}
-
-function canUseExternal(unit) {
-  return unit.kg_total <= 5000;
-}
-
-function getExternalCostRatio(unit, externalCost) {
-  if (!unit.valor_total_dolares) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  return externalCost / unit.valor_total_dolares;
-}
-
-function meetsExternalRatioThreshold(unit, externalCost) {
-  return getExternalCostRatio(unit, externalCost) < EXTERNAL_RATIO_LIMIT;
-}
-
-function compareUnits(left, right) {
-  return (
-    Number(canUseVan(right)) - Number(canUseVan(left)) ||
-    right.prioridad_peso - left.prioridad_peso ||
-    Number(isPrioritySingleUnit(right)) - Number(isPrioritySingleUnit(left)) ||
-    right.zonas.length - left.zonas.length ||
-    right.valor_total_dolares - left.valor_total_dolares ||
-    right.kg_total - left.kg_total ||
-    right.clientes_total - left.clientes_total
-  );
-}
-
 function buildPlanItem(unit, vehicle, tipo, motivo) {
   return {
     vehiculo: vehicle.codigo,
@@ -348,6 +167,14 @@ function buildPlanItem(unit, vehicle, tipo, motivo) {
     cajas_total: unit.cajas_total,
     motivo,
   };
+}
+
+function getExternalCostRatio(unit, externalCost) {
+  if (!unit.valor_total_dolares) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return externalCost / unit.valor_total_dolares;
 }
 
 function buildExternalItem(unit, externalCost) {
@@ -408,112 +235,6 @@ function buildAssignmentReason(unit, tipo) {
   return 'Camión asignado por capacidad o conveniencia operativa.';
 }
 
-function scoreDecisionSet(plan, zonasExterno, zonasManana) {
-  const priorityServedWeight = sum([...plan, ...zonasExterno].map((item) => sum(item.zonas.map((zone) => PRIORITY_ZONE_WEIGHTS[zone] || 0))));
-  const priorityPendingWeight = sum(zonasManana.map((item) => sum(item.zonas.map((zone) => PRIORITY_ZONE_WEIGHTS[zone] || 0))));
-  const ownPriorityWeight = sum(plan.map((item) => sum(item.zonas.map((zone) => PRIORITY_ZONE_WEIGHTS[zone] || 0))));
-  const totalServedZones = sum([...plan, ...zonasExterno].map((item) => item.zonas.length));
-  const totalValueToday = sum(plan.map((item) => item.valor_total_dolares)) + sum(zonasExterno.map((item) => item.valor_dolares));
-  const externalZoneCount = sum(zonasExterno.map((item) => item.zonas.length));
-  const priorityVanWeight = sum(plan.filter((item) => item.tipo === 'camioneta').map((item) => sum(item.zonas.map((zone) => PRIORITY_ZONE_WEIGHTS[zone] || 0))));
-  const vanAssignmentCount = plan.filter((item) => item.tipo === 'camioneta').length;
-  const truckAssignmentCount = plan.filter((item) => item.tipo === 'camion').length;
-  const vanLoadWeight = sum(plan.filter((item) => item.tipo === 'camioneta').map((item) => item.kg_total));
-  const northSouthTruckCount = plan.filter((item) => item.tipo === 'camion' && item.zonas.length === 2 && item.zonas.includes('NORTE') && item.zonas.includes('SUR')).length;
-  const lastResortExternalCount = zonasExterno.filter((item) => item.es_ultimo_recurso).length;
-  const rentableExternalCount = zonasExterno.length - lastResortExternalCount;
-
-  return (
-    priorityServedWeight * 1e12 -
-    priorityPendingWeight * 1e13 +
-    ownPriorityWeight * 1e9 +
-    totalServedZones * 1e7 +
-    totalValueToday * 100 -
-    truckAssignmentCount * 1e6 +
-    vanAssignmentCount * 5e5 +
-    vanLoadWeight * 200 +
-    rentableExternalCount * 1e5 -
-    externalZoneCount * 1000 -
-    lastResortExternalCount * 1e10 +
-    priorityVanWeight * 10 +
-    northSouthTruckCount * 100
-  );
-}
-
-function searchAssignments(units, fleet, externalCost) {
-  const sortedUnits = [...units].sort(compareUnits);
-  let best = { score: Number.NEGATIVE_INFINITY, plan: [], zonasExterno: [], zonasManana: [] };
-
-  function recurse(index, availableVans, availableTrucks, plan, zonasExterno, zonasManana) {
-    if (index >= sortedUnits.length) {
-      const score = scoreDecisionSet(plan, zonasExterno, zonasManana);
-      if (score > best.score) {
-        best = {
-          score,
-          plan: plan.map((item) => ({ ...item, zonas: [...item.zonas] })),
-          zonasExterno: zonasExterno.map((item) => ({ ...item, zonas: [...item.zonas] })),
-          zonasManana: zonasManana.map((item) => ({ ...item, zonas: [...item.zonas] })),
-        };
-      }
-      return;
-    }
-
-    const unit = sortedUnits[index];
-    const vanEligible = canUseVan(unit);
-    const truckEligible = canUseTruck(unit);
-    let assignedInternally = false;
-
-    if (availableVans.length > 0 && vanEligible) {
-      assignedInternally = true;
-      recurse(
-        index + 1,
-        availableVans.slice(1),
-        availableTrucks,
-        [...plan, buildPlanItem(unit, availableVans[0], 'camioneta', buildAssignmentReason(unit, 'camioneta'))],
-        zonasExterno,
-        zonasManana,
-      );
-    }
-
-    if (availableTrucks.length > 0 && truckEligible) {
-      assignedInternally = true;
-      recurse(
-        index + 1,
-        availableVans,
-        availableTrucks.slice(1),
-        [...plan, buildPlanItem(unit, availableTrucks[0], 'camion', buildAssignmentReason(unit, 'camion'))],
-        zonasExterno,
-        zonasManana,
-      );
-    }
-
-    if ((!vanEligible || !assignedInternally) && canUseExternal(unit)) {
-      recurse(
-        index + 1,
-        availableVans,
-        availableTrucks,
-        plan,
-        [...zonasExterno, buildExternalItem(unit, externalCost)],
-        zonasManana,
-      );
-    }
-
-    if (!assignedInternally) {
-      recurse(
-        index + 1,
-        availableVans,
-        availableTrucks,
-        plan,
-        zonasExterno,
-        [...zonasManana, buildTomorrowItem(unit)],
-      );
-    }
-  }
-
-  recurse(0, fleet.camionetasDisponibles, fleet.camionesDisponibles, [], [], []);
-  return best;
-}
-
 function sortPlan(plan) {
   return [...plan].sort((left, right) => left.vehiculo.localeCompare(right.vehiculo, 'es'));
 }
@@ -552,38 +273,75 @@ function buildRecommendations(plan, zonasExterno, zonasManana) {
   return notes;
 }
 
-function buildStructuredResult(best, zoneMap, fleet, externalCost, combinationsCount) {
-  const plan = sortPlan(best.plan);
-  const zonas_externo = best.zonasExterno;
-  const zonas_mañana = best.zonasManana;
-  const valorDespachadoHoy = sum(plan.map((item) => item.valor_total_dolares)) + sum(zonas_externo.map((item) => item.valor_dolares));
-  const valorPendiente = sum(zonas_mañana.map((item) => item.valor_dolares));
-  const clientesDespachados = sum(plan.map((item) => item.clientes_total)) + sum(zonas_externo.map((item) => item.clientes_total));
-  const clientesPendientes = sum(zonas_mañana.map((item) => item.clientes_total));
+/**
+ * Convierte la salida del branch & bound (grupos de zonas por vehículo +
+ * lista de zonas pospuestas) al formato de reporte del optimizador. Cada
+ * grupo del mismo tipo se reparte a un vehículo físico distinto de la
+ * flota disponible (son intercambiables entre sí, así que el orden no
+ * importa).
+ */
+function buildDispatchFromAssignment(assignment, zoneMap, fleet, externalCost) {
+  const plan = [];
+  const zonasExterno = [];
+  const zonasManana = [];
+
+  const camionetasQueue = [...fleet.camionetasDisponibles];
+  const camionesQueue = [...fleet.camionesDisponibles];
+
+  for (const group of assignment.groups) {
+    const unit = buildUnit(group.zonas, zoneMap);
+
+    if (group.tipo === 'camioneta') {
+      const vehicle = camionetasQueue.shift();
+      plan.push(buildPlanItem(unit, vehicle, 'camioneta', buildAssignmentReason(unit, 'camioneta')));
+    } else if (group.tipo === 'camion') {
+      const vehicle = camionesQueue.shift();
+      plan.push(buildPlanItem(unit, vehicle, 'camion', buildAssignmentReason(unit, 'camion')));
+    } else {
+      zonasExterno.push(buildExternalItem(unit, externalCost));
+    }
+  }
+
+  for (const zoneName of assignment.deferred) {
+    zonasManana.push(buildTomorrowItem(buildUnit([zoneName], zoneMap)));
+  }
+
+  return { plan, zonasExterno, zonasManana };
+}
+
+function buildStructuredResult({ plan, zonasExterno, zonasManana }, zoneMap, fleet, externalCost, diagnostics) {
+  const sortedPlan = sortPlan(plan);
+  const valorDespachadoHoy = sum(sortedPlan.map((item) => item.valor_total_dolares)) + sum(zonasExterno.map((item) => item.valor_dolares));
+  const valorPendiente = sum(zonasManana.map((item) => item.valor_dolares));
+  const clientesDespachados = sum(sortedPlan.map((item) => item.clientes_total)) + sum(zonasExterno.map((item) => item.clientes_total));
+  const clientesPendientes = sum(zonasManana.map((item) => item.clientes_total));
   const totalVehiclesAvailable = fleet.camionetasDisponibles.length + fleet.camionesDisponibles.length;
 
   return {
     fecha: new Date(),
     zonas_input: [...zoneMap.values()],
     costo_externo_referencia: externalCost,
-    plan,
-    zonas_externo,
-    zonas_mañana,
-    recomendaciones: buildRecommendations(plan, zonas_externo, zonas_mañana),
+    plan: sortedPlan,
+    zonas_externo: zonasExterno,
+    zonas_mañana: zonasManana,
+    recomendaciones: buildRecommendations(sortedPlan, zonasExterno, zonasManana),
     estrategia: {
-      criterio: 'Atender primero NORTE, OESTE, SUR y CENTRO; exprimir primero las camionetas por costo, usar camión cuando agregue capacidad real y dejar externo como última instancia.',
-      combinaciones_evaluadas: combinationsCount,
-      zonas_atendidas_hoy: [...plan, ...zonas_externo].flatMap((item) => item.zonas),
+      criterio: 'Optimización combinatoria exacta (branch & bound con poda por cotas admisibles): primero minimizar zonas críticas (NORTE/OESTE/SUR/CENTRO) pospuestas, luego maximizar el valor neto despachado hoy en dólares reales, y por último preferir vehículos propios sobre externo en empates económicos.',
+      combinaciones_evaluadas: diagnostics.nodesExplored,
+      zonas_atendidas_hoy: [...sortedPlan, ...zonasExterno].flatMap((item) => item.zonas),
+      prioridad_pospuesta: diagnostics.pendingPriority,
+      valor_neto_optimo: diagnostics.netValue,
+      busqueda_completa: !diagnostics.aborted,
     },
     resumen: {
       valor_despachado_hoy: round(valorDespachadoHoy, 2),
       valor_pendiente: round(valorPendiente, 2),
-      vehiculos_usados: plan.length,
-      vehiculos_libres: Math.max(totalVehiclesAvailable - plan.length, 0),
-      necesita_externo: zonas_externo.length > 0,
-      porcentaje_flota_usada: totalVehiclesAvailable > 0 ? round((plan.length / totalVehiclesAvailable) * 100, 1) : 0,
-      camionetas_usadas: plan.filter((item) => item.tipo === 'camioneta').length,
-      camiones_usados: plan.filter((item) => item.tipo === 'camion').length,
+      vehiculos_usados: sortedPlan.length,
+      vehiculos_libres: Math.max(totalVehiclesAvailable - sortedPlan.length, 0),
+      necesita_externo: zonasExterno.length > 0,
+      porcentaje_flota_usada: totalVehiclesAvailable > 0 ? round((sortedPlan.length / totalVehiclesAvailable) * 100, 1) : 0,
+      camionetas_usadas: sortedPlan.filter((item) => item.tipo === 'camioneta').length,
+      camiones_usados: sortedPlan.filter((item) => item.tipo === 'camion').length,
       camionetas_habilitadas: fleet.camionetasDisponibles.length,
       camiones_habilitados: fleet.camionesDisponibles.length,
       camionetas_configuradas: fleet.camionetas.length,
@@ -596,6 +354,10 @@ function buildStructuredResult(best, zoneMap, fleet, externalCost, combinationsC
       camiones: fleet.camiones,
     },
   };
+}
+
+function capacityOf(vehicle, fallback) {
+  return vehicle ? { kg: vehicle.capacidadKg, clientes: vehicle.capacidadClientes } : fallback;
 }
 
 function calculateOptimalDispatch({ zonas, costoExternoReferencia, costo_externo_referencia, vehiculos } = {}) {
@@ -611,17 +373,25 @@ function calculateOptimalDispatch({ zonas, costoExternoReferencia, costo_externo
   const externalCost = requestedExternalCost > 0 ? requestedExternalCost : DEFAULT_EXTERNAL_COST;
   const zoneMap = buildZoneMap(normalizedZones);
   const fleet = buildVehicleAvailability(vehiculos);
-  const planOptions = buildPlanOptions(zoneMap);
-  let bestOverall = null;
 
-  for (const units of planOptions) {
-    const candidate = searchAssignments(units, fleet, externalCost);
-    if (!bestOverall || candidate.score > bestOverall.score) {
-      bestOverall = candidate;
-    }
-  }
+  const camionetaCapacity = capacityOf(fleet.camionetasDisponibles[0], capacityOf(DEFAULT_FLEET.camionetas[0]));
+  const camionCapacity = capacityOf(fleet.camionesDisponibles[0], capacityOf(DEFAULT_FLEET.camiones[0]));
 
-  return buildStructuredResult(bestOverall, zoneMap, fleet, externalCost, planOptions.length);
+  const assignment = solveDispatchAssignment({
+    zones: normalizedZones,
+    camionetaCapacity,
+    camionCapacity,
+    camionetasCount: fleet.camionetasDisponibles.length,
+    camionesCount: fleet.camionesDisponibles.length,
+    externalCost,
+    priorityWeights: new Map(Object.entries(PRIORITY_ZONE_WEIGHTS)),
+    soloTruckZones: SOLO_TRUCK_ZONES,
+    vanRestrictedZones: VAN_RESTRICTED_ZONES,
+  });
+
+  const { plan, zonasExterno, zonasManana } = buildDispatchFromAssignment(assignment, zoneMap, fleet, externalCost);
+
+  return buildStructuredResult({ plan, zonasExterno, zonasManana }, zoneMap, fleet, externalCost, assignment.diagnostics);
 }
 
 module.exports = {
