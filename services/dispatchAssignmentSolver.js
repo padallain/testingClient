@@ -48,9 +48,8 @@
 const EXTERNAL_CAPACITY_KG = 5000;
 const EXTERNAL_CAPACITY_CLIENTES = Number.MAX_SAFE_INTEGER;
 const MAX_EXTERNAL_GROUPS = 10;
-const VAN_TIEBREAK_COST = 1;
-const TRUCK_TIEBREAK_COST = 2;
-const EXTERNAL_TIEBREAK_COST = 3;
+const OWN_VEHICLE_TIEBREAK_COST = 1;
+const EXTERNAL_TIEBREAK_COST = 2;
 const VALUE_EPSILON = 1e-6;
 const MAX_NODES = 4_000_000;
 const MAX_TIME_MS = 5000;
@@ -75,29 +74,48 @@ function isCompatibleWithGroup(existingZones, candidateZone, incompatiblePairs) 
   return !existingZones.some((name) => incompatiblePairs.has(pairKey(name, candidateZone)));
 }
 
-function capacityFor(tipo, context) {
-  if (tipo === 'camioneta') return context.camionetaCapacity;
-  if (tipo === 'camion') return context.camionCapacity;
-  return { kg: EXTERNAL_CAPACITY_KG, clientes: EXTERNAL_CAPACITY_CLIENTES };
+function vehicleAllowsZone(vehicle, zoneName) {
+  if (!vehicle) {
+    return true;
+  }
+
+  if (!Array.isArray(vehicle.zonasPermitidas) || vehicle.zonasPermitidas.length === 0) {
+    return true;
+  }
+
+  return vehicle.zonasPermitidas.includes(zoneName);
 }
 
-function canOpenGroup(tipo, zone, context) {
-  if (tipo === 'camioneta' && context.vanRestrictedZones.has(zone.nombre)) {
+function capacityForGroup(group, context) {
+  if (group.tipo === 'externo') {
+    return { kg: EXTERNAL_CAPACITY_KG, clientes: EXTERNAL_CAPACITY_CLIENTES };
+  }
+
+  const vehicle = context.vehicleMap.get(String(group.vehicleId));
+  return vehicle ? { kg: vehicle.capacidadKg, clientes: vehicle.capacidadClientes } : { kg: 0, clientes: 0 };
+}
+
+function canOpenOwnGroup(vehicle, zone) {
+  if (!vehicleAllowsZone(vehicle, zone.nombre)) {
     return false;
   }
-  const cap = capacityFor(tipo, context);
-  return zone.kg <= cap.kg && zone.clientes <= cap.clientes;
+
+  return zone.kg <= vehicle.capacidadKg && zone.clientes <= vehicle.capacidadClientes;
 }
 
 function canJoinGroup(group, zone, context) {
-  if (group.tipo === 'camioneta' && context.vanRestrictedZones.has(zone.nombre)) {
-    return false;
+  if (group.tipo === 'propio') {
+    const vehicle = context.vehicleMap.get(String(group.vehicleId));
+    if (!vehicleAllowsZone(vehicle, zone.nombre)) {
+      return false;
+    }
   }
+
   if (context.dedicatedZones.has(zone.nombre)) return false; // zona dedicada: nunca comparte vehículo
   if (group.zonas.some((name) => context.dedicatedZones.has(name))) return false;
   if (!isCompatibleWithGroup(group.zonas, zone.nombre, context.incompatiblePairs)) return false;
 
-  const cap = capacityFor(group.tipo, context);
+  const cap = capacityForGroup(group, context);
   if (group.kg + zone.kg > cap.kg) return false;
   if (group.clientes + zone.clientes > cap.clientes) return false;
 
@@ -122,8 +140,8 @@ function cloneGroups(groups) {
 }
 
 /**
- * Resuelve la asignación óptima de `zones` a camionetas/camiones/externo/
- * mañana.
+ * Resuelve la asignación óptima de `zones` a vehículos propios
+ * configurados individualmente / externo / mañana.
  *
  * Parámetros de reglas de negocio (todos configurables por quien llama,
  * este módulo no asume ninguna zona en particular):
@@ -131,21 +149,16 @@ function cloneGroups(groups) {
  *     no prioritaria (nunca bloquea la etapa 1 de la comparación).
  *   - dedicatedZones: Set(nombreZona) que nunca comparte vehículo con
  *     ninguna otra zona (viaja siempre sola).
- *   - vanRestrictedZones: Set(nombreZona) que no puede usar camioneta.
  *   - incompatiblePairs: Set de claves canónicas "a|b" (usar
  *     buildIncompatibilitySet) — pares de zonas que no pueden compartir
  *     vehículo entre sí.
  */
 function solveDispatchAssignment({
   zones,
-  camionetaCapacity,
-  camionCapacity,
-  camionetasCount,
-  camionesCount,
+  vehicles,
   externalCost,
   priorityWeights,
   dedicatedZones,
-  vanRestrictedZones,
   incompatiblePairs,
 }) {
   if (!zones.length) {
@@ -162,16 +175,28 @@ function solveDispatchAssignment({
     return b.valor_dolares - a.valor_dolares;
   });
 
+  const availableVehicles = [...(Array.isArray(vehicles) ? vehicles : [])]
+    .map((vehicle) => ({ ...vehicle, id: String(vehicle.id) }))
+    .sort((left, right) => {
+      if (right.capacidadKg !== left.capacidadKg) {
+        return right.capacidadKg - left.capacidadKg;
+      }
+
+      if (right.capacidadClientes !== left.capacidadClientes) {
+        return right.capacidadClientes - left.capacidadClientes;
+      }
+
+      return String(left.id).localeCompare(String(right.id), 'es');
+    });
+
   const suffixValue = new Array(orderedZones.length + 1).fill(0);
   for (let i = orderedZones.length - 1; i >= 0; i -= 1) {
     suffixValue[i] = suffixValue[i + 1] + orderedZones[i].valor_dolares;
   }
 
   const context = {
-    camionetaCapacity: { kg: camionetaCapacity.kg, clientes: camionetaCapacity.clientes },
-    camionCapacity: { kg: camionCapacity.kg, clientes: camionCapacity.clientes },
+    vehicleMap: new Map(availableVehicles.map((vehicle) => [String(vehicle.id), vehicle])),
     dedicatedZones,
-    vanRestrictedZones,
     incompatiblePairs: incompatiblePairs || new Set(),
   };
 
@@ -179,12 +204,11 @@ function solveDispatchAssignment({
 
   const openGroups = [];
   const deferred = [];
-  let camionetaCount = 0;
-  let camionCount = 0;
   let externalCount = 0;
   let pendingPriority = 0;
   let netValue = 0;
   let vehicleTieCost = 0;
+  const usedVehicleIds = new Set();
 
   let incumbent = null;
   let nodesExplored = 0;
@@ -251,40 +275,36 @@ function solveDispatchAssignment({
       group.zonas.pop();
     }
 
-    // Opción 2: abrir un grupo nuevo de camioneta.
-    if (camionetaCount < camionetasCount && canOpenGroup('camioneta', zone, context)) {
-      openGroups.push({ tipo: 'camioneta', zonas: [zone.nombre], kg: zone.kg, clientes: zone.clientes });
-      camionetaCount += 1;
+    // Opción 2: abrir un grupo nuevo en un vehículo propio disponible.
+    const seenVehicleSignatures = new Set();
+
+    for (const vehicle of availableVehicles) {
+      if (usedVehicleIds.has(vehicle.id) || !canOpenOwnGroup(vehicle, zone)) {
+        continue;
+      }
+
+      const signature = `${vehicle.capacidadKg}|${vehicle.capacidadClientes}|${(vehicle.zonasPermitidas || []).join(',')}`;
+      if (seenVehicleSignatures.has(signature)) {
+        continue;
+      }
+      seenVehicleSignatures.add(signature);
+
+      openGroups.push({ tipo: 'propio', vehicleId: vehicle.id, zonas: [zone.nombre], kg: zone.kg, clientes: zone.clientes });
+      usedVehicleIds.add(vehicle.id);
       netValue += zone.valor_dolares;
-      vehicleTieCost += VAN_TIEBREAK_COST;
+      vehicleTieCost += OWN_VEHICLE_TIEBREAK_COST;
 
       search(index + 1);
       if (aborted) return;
 
-      vehicleTieCost -= VAN_TIEBREAK_COST;
+      vehicleTieCost -= OWN_VEHICLE_TIEBREAK_COST;
       netValue -= zone.valor_dolares;
-      camionetaCount -= 1;
+      usedVehicleIds.delete(vehicle.id);
       openGroups.pop();
     }
 
-    // Opción 3: abrir un grupo nuevo de camión.
-    if (camionCount < camionesCount && canOpenGroup('camion', zone, context)) {
-      openGroups.push({ tipo: 'camion', zonas: [zone.nombre], kg: zone.kg, clientes: zone.clientes });
-      camionCount += 1;
-      netValue += zone.valor_dolares;
-      vehicleTieCost += TRUCK_TIEBREAK_COST;
-
-      search(index + 1);
-      if (aborted) return;
-
-      vehicleTieCost -= TRUCK_TIEBREAK_COST;
-      netValue -= zone.valor_dolares;
-      camionCount -= 1;
-      openGroups.pop();
-    }
-
-    // Opción 4: abrir un grupo nuevo externo.
-    if (externalCount < maxExternalGroups && canOpenGroup('externo', zone, context)) {
+    // Opción 3: abrir un grupo nuevo externo.
+    if (externalCount < maxExternalGroups && zone.kg <= EXTERNAL_CAPACITY_KG && zone.clientes <= EXTERNAL_CAPACITY_CLIENTES) {
       openGroups.push({ tipo: 'externo', zonas: [zone.nombre], kg: zone.kg, clientes: zone.clientes });
       externalCount += 1;
       netValue += zone.valor_dolares - externalCost;
@@ -299,7 +319,7 @@ function solveDispatchAssignment({
       openGroups.pop();
     }
 
-    // Opción 5: postergar para mañana.
+    // Opción 4: postergar para mañana.
     deferred.push(zone.nombre);
     pendingPriority += zoneWeight;
 

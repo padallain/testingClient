@@ -1,4 +1,11 @@
 const { solveDispatchAssignment, buildIncompatibilitySet } = require('./dispatchAssignmentSolver');
+const {
+  PRIORITY_WEIGHTS: MARACAIBO_PRIORITY_WEIGHTS,
+  DEDICATED_ZONES: MARACAIBO_DEDICATED_ZONES,
+  VAN_RESTRICTED_ZONES: MARACAIBO_VAN_RESTRICTED_ZONES,
+  OJEDA_ALLOWED_PARTNERS: MARACAIBO_OJEDA_ALLOWED_PARTNERS,
+  FIXED_INCOMPATIBLE_PAIRS: MARACAIBO_FIXED_INCOMPATIBLE_PAIRS,
+} = require('./dispatchTerritoryConfig');
 
 const DEFAULT_EXTERNAL_COST = 170;
 const EXTERNAL_RATIO_LIMIT = 0.02;
@@ -10,36 +17,36 @@ const EXTERNAL_RATIO_LIMIT = 0.02;
  * `resolveZoneConfig`). Así, otra ciudad puede usar este mismo backend
  * mandando su propia configuración sin tocar código ni redeploy.
  */
-const MARACAIBO_PRIORITY_WEIGHTS = { NORTE: 4, OESTE: 3, SUR: 2, CENTRO: 1 };
-const MARACAIBO_DEDICATED_ZONES = ['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA'];
-const MARACAIBO_VAN_RESTRICTED_ZONES = ['MENEGRANDE', 'MACHIQUES', 'MARA'];
-// OJEDA solo puede compartir vehículo con estas tres zonas; se marca
-// incompatible con cualquier otra zona presente en la petición.
-const MARACAIBO_OJEDA_ALLOWED_PARTNERS = ['CABIMAS', 'MENEGRANDE', 'BACHAQUERO'];
-// Simplificación pareada de la regla histórica "CENTRO+OESTE solo vale si
-// además va NORTE o SUR": con el modelo genérico de pares incompatibles
-// no se puede expresar esa condicionalidad, así que CENTRO y OESTE quedan
-// incompatibles entre sí siempre (deja de ser posible NORTE+CENTRO+OESTE
-// o SUR+CENTRO+OESTE en un mismo vehículo).
-const MARACAIBO_FIXED_INCOMPATIBLE_PAIRS = [['CENTRO', 'OESTE']];
-
 const DEFAULT_FLEET = {
-  camionetas: Array.from({ length: 3 }, (_, index) => ({
-    id: index + 1,
-    codigo: `CAMIONETA_${index + 1}`,
-    nombre: `Camioneta ${index + 1}`,
-    capacidadKg: 950,
-    capacidadClientes: 40,
-    disponible: true,
-  })),
-  camiones: Array.from({ length: 3 }, (_, index) => ({
-    id: index + 1,
-    codigo: `CAMION_${index + 1}`,
-    nombre: `Camión ${index + 1}`,
-    capacidadKg: 5000,
-    capacidadClientes: 30,
-    disponible: true,
-  })),
+  unidades: [
+    {
+      id: 1,
+      codigo: 'VEHICULO_1',
+      nombre: 'Vehículo 1',
+      capacidadKg: 950,
+      capacidadClientes: 40,
+      disponible: true,
+      zonasPermitidas: [],
+    },
+    {
+      id: 2,
+      codigo: 'VEHICULO_2',
+      nombre: 'Vehículo 2',
+      capacidadKg: 950,
+      capacidadClientes: 40,
+      disponible: true,
+      zonasPermitidas: [],
+    },
+    {
+      id: 3,
+      codigo: 'VEHICULO_3',
+      nombre: 'Vehículo 3',
+      capacidadKg: 5000,
+      capacidadClientes: 30,
+      disponible: true,
+      zonasPermitidas: [],
+    },
+  ],
 };
 
 // Solo trim + mayúsculas: normaliza espacios y capitalización sin perder
@@ -72,12 +79,14 @@ function normalizeZones(zonas) {
 
   for (const zone of zonas) {
     const nombre = normalizeZoneName(zone?.nombre);
+    const zoneId = String(zone?.id || nombre || '').trim();
 
     if (!nombre) {
       continue;
     }
 
     const current = deduped.get(nombre) || {
+      id: zoneId || nombre,
       nombre,
       clientes: 0,
       cajas: 0,
@@ -99,37 +108,50 @@ function normalizeZones(zonas) {
   return [...deduped.values()].filter((zone) => zone.kg > 0 || zone.valor_dolares > 0 || zone.clientes > 0 || zone.cajas > 0);
 }
 
-function normalizeVehicleList(rawList, defaults) {
-  if (!Array.isArray(rawList) || rawList.length === 0) {
-    return defaults.map((vehicle) => ({ ...vehicle }));
+function normalizeVehicleList(rawList, defaults, useDefaultsWhenEmpty = true) {
+  if (!Array.isArray(rawList)) {
+    return useDefaultsWhenEmpty ? defaults.map((vehicle) => ({ ...vehicle })) : [];
   }
 
-  const byId = new Map(rawList.map((vehicle) => [Number(vehicle?.id), vehicle]));
+  if (rawList.length === 0) {
+    return [];
+  }
 
-  return defaults.map((vehicle) => {
-    const override = byId.get(vehicle.id);
-    if (!override) {
-      return { ...vehicle, disponible: true };
-    }
+  return rawList
+    .map((vehicle, index) => {
+      const fallback = defaults[index] || defaults[0] || {};
+      const numericIndex = index + 1;
 
-    return {
-      ...vehicle,
-      disponible: override.disponible !== undefined ? Boolean(override.disponible) : true,
-      capacidadKg: toPositiveNumber(override.capacidadKg) || vehicle.capacidadKg,
-      capacidadClientes: toPositiveNumber(override.capacidadClientes) || vehicle.capacidadClientes,
-    };
-  });
+      return {
+        id: vehicle?.id ?? fallback.id ?? numericIndex,
+        codigo: String(vehicle?.codigo || fallback.codigo || `VEHICULO_${numericIndex}`),
+        nombre: String(vehicle?.nombre || fallback.nombre || `Vehículo ${numericIndex}`),
+        disponible: vehicle?.disponible !== undefined ? Boolean(vehicle.disponible) : true,
+        capacidadKg: toPositiveNumber(vehicle?.capacidadKg),
+        capacidadClientes: toPositiveNumber(vehicle?.capacidadClientes),
+        zonasPermitidas: Array.isArray(vehicle?.zonasPermitidas)
+          ? [...new Set(vehicle.zonasPermitidas.map(normalizeZoneName).filter(Boolean))]
+          : [],
+      };
+    })
+    .filter((vehicle) => vehicle.capacidadKg > 0 && vehicle.capacidadClientes > 0);
+}
+
+function flattenFleetInput(vehiculos) {
+  if (Array.isArray(vehiculos?.unidades)) {
+    return vehiculos.unidades;
+  }
+
+  return [...(Array.isArray(vehiculos?.camionetas) ? vehiculos.camionetas : []), ...(Array.isArray(vehiculos?.camiones) ? vehiculos.camiones : [])];
 }
 
 function buildVehicleAvailability(vehiculos) {
-  const camionetas = normalizeVehicleList(vehiculos?.camionetas, DEFAULT_FLEET.camionetas);
-  const camiones = normalizeVehicleList(vehiculos?.camiones, DEFAULT_FLEET.camiones);
+  const hasExplicitFleet = Boolean(vehiculos && typeof vehiculos === 'object');
+  const unidades = normalizeVehicleList(flattenFleetInput(vehiculos), DEFAULT_FLEET.unidades, !hasExplicitFleet);
 
   return {
-    camionetas,
-    camiones,
-    camionetasDisponibles: camionetas.filter((vehicle) => vehicle.disponible),
-    camionesDisponibles: camiones.filter((vehicle) => vehicle.disponible),
+    unidades,
+    unidadesDisponibles: unidades.filter((vehicle) => vehicle.disponible),
   };
 }
 
@@ -142,6 +164,7 @@ function buildUnit(zoneNames, zoneMap) {
 
   return {
     zonas: sourceZones.map((zone) => zone.nombre),
+    zonas_ids: sourceZones.map((zone) => zone.id),
     kg_total: sum(sourceZones.map((zone) => zone.kg)),
     valor_total_dolares: sum(sourceZones.map((zone) => zone.valor_dolares)),
     clientes_total: sum(sourceZones.map((zone) => zone.clientes)),
@@ -165,6 +188,7 @@ function buildPlanItem(unit, vehicle, tipo, motivo) {
     nombre_vehiculo: vehicle.nombre,
     tipo,
     zonas: [...unit.zonas],
+    zonas_ids: [...unit.zonas_ids],
     kg_total: unit.kg_total,
     capacidad_kg: vehicle.capacidadKg,
     porcentaje_ocupacion: round((unit.kg_total / vehicle.capacidadKg) * 100, 2),
@@ -190,6 +214,7 @@ function buildExternalItem(unit, externalCost) {
   return {
     zona: unit.zonas.join(' + '),
     zonas: [...unit.zonas],
+    zonas_ids: [...unit.zonas_ids],
     valor_dolares: unit.valor_total_dolares,
     kg_total: unit.kg_total,
     clientes_total: unit.clientes_total,
@@ -207,6 +232,7 @@ function buildTomorrowItem(unit) {
   return {
     zona: unit.zonas.join(' + '),
     zonas: [...unit.zonas],
+    zonas_ids: [...unit.zonas_ids],
     valor_dolares: unit.valor_total_dolares,
     kg_total: unit.kg_total,
     clientes_total: unit.clientes_total,
@@ -218,28 +244,17 @@ function buildTomorrowItem(unit) {
 function buildAssignmentReason(unit, tipo, zoneConfig) {
   const isDedicated = unit.zonas.some((zone) => zoneConfig.dedicatedZones.has(zone));
 
-  if (tipo === 'camioneta') {
-    if (isDedicated) {
-      return 'Camioneta priorizada para zona dedicada disponible.';
-    }
-    return isPrioritySingleUnit(unit, zoneConfig)
-      ? 'Camioneta priorizada para zona crítica y atención rápida.'
-      : 'Camioneta asignada por tamaño de carga y accesibilidad.';
-  }
-
   if (isDedicated) {
     return 'Zona dedicada: viaja sola, sin combinar con otras zonas.';
   }
 
-  if (unit.zonas.some((zone) => zoneConfig.vanRestrictedZones.has(zone))) {
-    return 'La combinación contiene zonas no aptas para camioneta.';
+  if (tipo === 'propio' && unit.zonas.length > 1 && isPriorityOnlyUnit(unit, zoneConfig)) {
+    return 'Vehículo propio usado para consolidar zonas prioritarias sin perder cobertura.';
   }
 
-  if (tipo === 'camion' && unit.zonas.length > 1 && isPriorityOnlyUnit(unit, zoneConfig)) {
-    return 'Camión usado para consolidar zonas prioritarias sin perder cobertura.';
-  }
-
-  return 'Camión asignado por capacidad o conveniencia operativa.';
+  return isPrioritySingleUnit(unit, zoneConfig)
+    ? 'Vehículo propio priorizado para zona crítica y atención rápida.'
+    : 'Vehículo propio asignado por capacidad y restricciones configuradas.';
 }
 
 function sortPlan(plan) {
@@ -254,14 +269,9 @@ function buildRecommendations(plan, zonasExterno, zonasManana, zoneConfig) {
     notes.push(`Las primeras zonas protegidas por el modelo fueron: ${coveredPriority.join(', ')}.`);
   }
 
-  const vanAssignments = plan.filter((item) => item.tipo === 'camioneta').flatMap((item) => item.zonas);
-  if (vanAssignments.length) {
-    notes.push(`Camionetas asignadas a: ${vanAssignments.join(', ')}.`);
-  }
-
-  const groupedTrucks = plan.filter((item) => item.tipo === 'camion' && item.zonas.length > 1).map((item) => item.zonas.join(' + '));
-  if (groupedTrucks.length) {
-    notes.push(`Consolidaciones en camión: ${groupedTrucks.join('; ')}.`);
+  const ownAssignments = plan.filter((item) => item.tipo === 'propio').map((item) => `${item.nombre_vehiculo}: ${item.zonas.join(' + ')}`);
+  if (ownAssignments.length) {
+    notes.push(`Vehículos propios asignados a: ${ownAssignments.join('; ')}.`);
   }
 
   if (zonasExterno.length) {
@@ -283,27 +293,23 @@ function buildRecommendations(plan, zonasExterno, zonasManana, zoneConfig) {
 /**
  * Convierte la salida del branch & bound (grupos de zonas por vehículo +
  * lista de zonas pospuestas) al formato de reporte del optimizador. Cada
- * grupo del mismo tipo se reparte a un vehículo físico distinto de la
- * flota disponible (son intercambiables entre sí, así que el orden no
- * importa).
+ * cada grupo propio se reparte al vehículo físico que abrió ese grupo.
  */
 function buildDispatchFromAssignment(assignment, zoneMap, fleet, externalCost, zoneConfig) {
   const plan = [];
   const zonasExterno = [];
   const zonasManana = [];
 
-  const camionetasQueue = [...fleet.camionetasDisponibles];
-  const camionesQueue = [...fleet.camionesDisponibles];
+  const vehicleMap = new Map(fleet.unidadesDisponibles.map((vehicle) => [String(vehicle.id), vehicle]));
 
   for (const group of assignment.groups) {
     const unit = buildUnit(group.zonas, zoneMap);
 
-    if (group.tipo === 'camioneta') {
-      const vehicle = camionetasQueue.shift();
-      plan.push(buildPlanItem(unit, vehicle, 'camioneta', buildAssignmentReason(unit, 'camioneta', zoneConfig)));
-    } else if (group.tipo === 'camion') {
-      const vehicle = camionesQueue.shift();
-      plan.push(buildPlanItem(unit, vehicle, 'camion', buildAssignmentReason(unit, 'camion', zoneConfig)));
+    if (group.tipo === 'propio') {
+      const vehicle = vehicleMap.get(String(group.vehicleId));
+      if (vehicle) {
+        plan.push(buildPlanItem(unit, vehicle, 'propio', buildAssignmentReason(unit, 'propio', zoneConfig)));
+      }
     } else {
       zonasExterno.push(buildExternalItem(unit, externalCost));
     }
@@ -322,7 +328,7 @@ function buildStructuredResult({ plan, zonasExterno, zonasManana }, zoneMap, fle
   const valorPendiente = sum(zonasManana.map((item) => item.valor_dolares));
   const clientesDespachados = sum(sortedPlan.map((item) => item.clientes_total)) + sum(zonasExterno.map((item) => item.clientes_total));
   const clientesPendientes = sum(zonasManana.map((item) => item.clientes_total));
-  const totalVehiclesAvailable = fleet.camionetasDisponibles.length + fleet.camionesDisponibles.length;
+  const totalVehiclesAvailable = fleet.unidadesDisponibles.length;
 
   return {
     fecha: new Date(),
@@ -347,24 +353,16 @@ function buildStructuredResult({ plan, zonasExterno, zonasManana }, zoneMap, fle
       vehiculos_libres: Math.max(totalVehiclesAvailable - sortedPlan.length, 0),
       necesita_externo: zonasExterno.length > 0,
       porcentaje_flota_usada: totalVehiclesAvailable > 0 ? round((sortedPlan.length / totalVehiclesAvailable) * 100, 1) : 0,
-      camionetas_usadas: sortedPlan.filter((item) => item.tipo === 'camioneta').length,
-      camiones_usados: sortedPlan.filter((item) => item.tipo === 'camion').length,
-      camionetas_habilitadas: fleet.camionetasDisponibles.length,
-      camiones_habilitados: fleet.camionesDisponibles.length,
-      camionetas_configuradas: fleet.camionetas.length,
-      camiones_configurados: fleet.camiones.length,
+      vehiculos_propios_usados: sortedPlan.filter((item) => item.tipo === 'propio').length,
+      vehiculos_propios_habilitados: fleet.unidadesDisponibles.length,
+      vehiculos_propios_configurados: fleet.unidades.length,
       clientes_despachados: clientesDespachados,
       clientes_pendientes: clientesPendientes,
     },
     disponibilidad_vehiculos: {
-      camionetas: fleet.camionetas,
-      camiones: fleet.camiones,
+      unidades: fleet.unidades,
     },
   };
-}
-
-function capacityOf(vehicle, fallback) {
-  return vehicle ? { kg: vehicle.capacidadKg, clientes: vehicle.capacidadClientes } : fallback;
 }
 
 /**
@@ -375,7 +373,6 @@ function capacityOf(vehicle, fallback) {
 function buildDefaultZoneConfig(zoneNames) {
   const priorityWeights = new Map(Object.entries(MARACAIBO_PRIORITY_WEIGHTS));
   const dedicatedZones = new Set(MARACAIBO_DEDICATED_ZONES);
-  const vanRestrictedZones = new Set(MARACAIBO_VAN_RESTRICTED_ZONES);
 
   const ojedaAllowed = new Set(MARACAIBO_OJEDA_ALLOWED_PARTNERS);
   const pairs = [...MARACAIBO_FIXED_INCOMPATIBLE_PAIRS];
@@ -389,7 +386,6 @@ function buildDefaultZoneConfig(zoneNames) {
     priorityWeights,
     priorityZoneNames: Object.keys(MARACAIBO_PRIORITY_WEIGHTS),
     dedicatedZones,
-    vanRestrictedZones,
     incompatiblePairs: buildIncompatibilitySet(pairs),
   };
 }
@@ -412,7 +408,6 @@ function buildZoneConfigFromInput(configZonas) {
   }
 
   const dedicatedZones = new Set((configZonas.dedicadas || []).map(normalizeZoneName).filter(Boolean));
-  const vanRestrictedZones = new Set((configZonas.sinCamioneta || []).map(normalizeZoneName).filter(Boolean));
   const incompatiblePairs = buildIncompatibilitySet(
     (configZonas.incompatibles || [])
       .filter((pair) => Array.isArray(pair) && pair.length === 2)
@@ -423,7 +418,6 @@ function buildZoneConfigFromInput(configZonas) {
     priorityWeights,
     priorityZoneNames: [...priorityWeights.keys()],
     dedicatedZones,
-    vanRestrictedZones,
     incompatiblePairs,
   };
 }
@@ -451,19 +445,12 @@ function calculateOptimalDispatch({ zonas, costoExternoReferencia, costo_externo
   const fleet = buildVehicleAvailability(vehiculos);
   const zoneConfig = resolveZoneConfig(configZonas, normalizedZones.map((zone) => zone.nombre));
 
-  const camionetaCapacity = capacityOf(fleet.camionetasDisponibles[0], capacityOf(DEFAULT_FLEET.camionetas[0]));
-  const camionCapacity = capacityOf(fleet.camionesDisponibles[0], capacityOf(DEFAULT_FLEET.camiones[0]));
-
   const assignment = solveDispatchAssignment({
     zones: normalizedZones,
-    camionetaCapacity,
-    camionCapacity,
-    camionetasCount: fleet.camionetasDisponibles.length,
-    camionesCount: fleet.camionesDisponibles.length,
+    vehicles: fleet.unidadesDisponibles,
     externalCost,
     priorityWeights: zoneConfig.priorityWeights,
     dedicatedZones: zoneConfig.dedicatedZones,
-    vanRestrictedZones: zoneConfig.vanRestrictedZones,
     incompatiblePairs: zoneConfig.incompatiblePairs,
   });
 
@@ -473,6 +460,7 @@ function calculateOptimalDispatch({ zonas, costoExternoReferencia, costo_externo
 }
 
 module.exports = {
+  DEFAULT_FLEET,
   calculateOptimalDispatch,
   normalizeZones,
   buildVehicleAvailability,

@@ -1,8 +1,10 @@
 const path = require('path');
-const { calculateOptimalDispatch } = require('../services/optimizador');
+const { calculateOptimalDispatch, DEFAULT_FLEET } = require('../services/optimizador');
+const { getDispatchTerritoryConfig } = require('../services/dispatchTerritoryConfig');
 
 function buildLegacyZones(zonas) {
   return Object.entries(zonas || {}).map(([nombre, data]) => ({
+    id: data?.id || nombre,
     nombre,
     clientes: Number(data?.clientes) || 0,
     cajas: Number(data?.cajas) || 0,
@@ -59,6 +61,16 @@ exports.getDispatchPage = (req, res) => {
   res.sendFile(path.join(__dirname, '../public/dispatch.html'));
 };
 
+exports.getDispatchConfig = (req, res) => {
+  res.json({
+    success: true,
+    territory: getDispatchTerritoryConfig(),
+    fleetDefaults: {
+      unidades: DEFAULT_FLEET.unidades.map((vehicle) => ({ ...vehicle })),
+    },
+  });
+};
+
 exports.calculateDispatch = (req, res) => {
   try {
     const { zonas, costoExterno, vehiculos, configZonas } = req.body || {};
@@ -92,14 +104,10 @@ exports.calculateDispatch = (req, res) => {
       recomendaciones: result.recomendaciones,
       estrategia: result.estrategia,
       resumen: {
-        camionetasConfiguradas: result.resumen.camionetas_configuradas,
-        camionetasHabilitadas: result.resumen.camionetas_habilitadas,
-        camionetasUsadas: result.resumen.camionetas_usadas,
-        camionetasSinUsar: result.resumen.camionetas_habilitadas - result.resumen.camionetas_usadas,
-        camionesConfigurados: result.resumen.camiones_configurados,
-        camionesHabilitados: result.resumen.camiones_habilitados,
-        camionesUsados: result.resumen.camiones_usados,
-        camionesSinUsar: result.resumen.camiones_habilitados - result.resumen.camiones_usados,
+        vehiculosConfigurados: result.resumen.vehiculos_propios_configurados,
+        vehiculosHabilitados: result.resumen.vehiculos_propios_habilitados,
+        vehiculosUsados: result.resumen.vehiculos_propios_usados,
+        vehiculosSinUsar: result.resumen.vehiculos_propios_habilitados - result.resumen.vehiculos_propios_usados,
         externosRequeridos: result.zonas_externo.length,
         rutasPospuestas: result.zonas_mañana.length,
         totalValorDespachado: result.resumen.valor_despachado_hoy,
@@ -108,8 +116,7 @@ exports.calculateDispatch = (req, res) => {
         totalClientesPospuestos: result.resumen.clientes_pendientes,
       },
       disponibilidadVehiculos: {
-        camionetas: result.disponibilidad_vehiculos.camionetas,
-        camiones: result.disponibilidad_vehiculos.camiones,
+        unidades: result.disponibilidad_vehiculos.unidades,
       },
       plan: result.plan,
       zonas_externo: result.zonas_externo,

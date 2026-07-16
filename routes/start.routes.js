@@ -4,7 +4,7 @@ const { makeRoute, getDriverCurrentRoute, listRouteAssignments, listRouteDispatc
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
-const { getDispatchPage, calculateDispatch } = require('../controllers/dispatch.controllers');
+const { getDispatchPage, getDispatchConfig, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
 const { createPickingReport, listRecentPickingReports, getPickingSummary, getPickingReportById, getPickingReportByOrderNumber, createPickingErrorReport } = require('../controllers/picking.controllers');
 const despachoRoutes = require('./despacho.routes');
@@ -91,6 +91,7 @@ router.get('/internal/admin/picking-reports/summary', requireAdminDeleteKey, get
 
 // Despacho logístico
 router.get('/dispatch', getDispatchPage);
+router.get('/dispatch/config', getDispatchConfig);
 router.post('/dispatch/calculate', calculateDispatch);
 router.get('/despacho', getDespachoPage);
 router.use('/api/despacho', despachoRoutes);
