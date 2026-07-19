@@ -90,7 +90,9 @@ function normalizeZones(zonas) {
       nombre,
       clientes: 0,
       cajas: 0,
+      valor_facturado_dolares: 0,
       valor_dolares: 0,
+      porcentaje_utilidad: toPositiveNumber(zone?.porcentaje_utilidad),
       kg: 0,
       dificil_acceso: false,
       ruta_larga: false,
@@ -98,7 +100,9 @@ function normalizeZones(zonas) {
 
     current.clientes += toPositiveNumber(zone?.clientes);
     current.cajas += toPositiveNumber(zone?.cajas);
+    current.valor_facturado_dolares += toPositiveNumber(zone?.valor_facturado_dolares ?? zone?.valor_facturado ?? zone?.valor);
     current.valor_dolares += toPositiveNumber(zone?.valor_dolares ?? zone?.valor);
+    current.porcentaje_utilidad = current.porcentaje_utilidad || toPositiveNumber(zone?.porcentaje_utilidad);
     current.kg += toPositiveNumber(zone?.kg ?? zone?.peso);
     current.dificil_acceso = current.dificil_acceso || Boolean(zone?.dificil_acceso);
     current.ruta_larga = current.ruta_larga || Boolean(zone?.ruta_larga);
@@ -166,7 +170,9 @@ function buildUnit(zoneNames, zoneMap) {
     zonas: sourceZones.map((zone) => zone.nombre),
     zonas_ids: sourceZones.map((zone) => zone.id),
     kg_total: sum(sourceZones.map((zone) => zone.kg)),
+    valor_facturado_total_dolares: sum(sourceZones.map((zone) => zone.valor_facturado_dolares)),
     valor_total_dolares: sum(sourceZones.map((zone) => zone.valor_dolares)),
+    porcentaje_utilidad_referencia: sourceZones.find((zone) => Number(zone.porcentaje_utilidad) > 0)?.porcentaje_utilidad || 0,
     clientes_total: sum(sourceZones.map((zone) => zone.clientes)),
     cajas_total: sum(sourceZones.map((zone) => zone.cajas)),
     dificil_acceso: sourceZones.some((zone) => zone.dificil_acceso),
@@ -192,7 +198,9 @@ function buildPlanItem(unit, vehicle, tipo, motivo) {
     kg_total: unit.kg_total,
     capacidad_kg: vehicle.capacidadKg,
     porcentaje_ocupacion: round((unit.kg_total / vehicle.capacidadKg) * 100, 2),
+    valor_facturado_total_dolares: unit.valor_facturado_total_dolares,
     valor_total_dolares: unit.valor_total_dolares,
+    porcentaje_utilidad_referencia: unit.porcentaje_utilidad_referencia,
     clientes_total: unit.clientes_total,
     cajas_total: unit.cajas_total,
     motivo,
@@ -215,10 +223,12 @@ function buildExternalItem(unit, externalCost) {
     zona: unit.zonas.join(' + '),
     zonas: [...unit.zonas],
     zonas_ids: [...unit.zonas_ids],
+    valor_facturado_dolares: unit.valor_facturado_total_dolares,
     valor_dolares: unit.valor_total_dolares,
     kg_total: unit.kg_total,
     clientes_total: unit.clientes_total,
     cajas_total: unit.cajas_total,
+    porcentaje_utilidad_referencia: unit.porcentaje_utilidad_referencia,
     razon: meetsRatioThreshold ? 'REQUIERE_EXTERNO' : 'EXTERNO_ULTIMO_RECURSO',
     costo_externo: externalCost,
     indicador_flete_porcentaje: Number.isFinite(ratio) ? round(ratio * 100, 2) : null,
@@ -233,10 +243,12 @@ function buildTomorrowItem(unit) {
     zona: unit.zonas.join(' + '),
     zonas: [...unit.zonas],
     zonas_ids: [...unit.zonas_ids],
+    valor_facturado_dolares: unit.valor_facturado_total_dolares,
     valor_dolares: unit.valor_total_dolares,
     kg_total: unit.kg_total,
     clientes_total: unit.clientes_total,
     cajas_total: unit.cajas_total,
+    porcentaje_utilidad_referencia: unit.porcentaje_utilidad_referencia,
     razon: 'PENDIENTE_MAÑANA',
   };
 }
@@ -324,16 +336,20 @@ function buildDispatchFromAssignment(assignment, zoneMap, fleet, externalCost, z
 
 function buildStructuredResult({ plan, zonasExterno, zonasManana }, zoneMap, fleet, externalCost, diagnostics, zoneConfig) {
   const sortedPlan = sortPlan(plan);
+  const facturadoDespachadoHoy = sum(sortedPlan.map((item) => item.valor_facturado_total_dolares)) + sum(zonasExterno.map((item) => item.valor_facturado_dolares));
   const valorDespachadoHoy = sum(sortedPlan.map((item) => item.valor_total_dolares)) + sum(zonasExterno.map((item) => item.valor_dolares));
+  const facturadoPendiente = sum(zonasManana.map((item) => item.valor_facturado_dolares));
   const valorPendiente = sum(zonasManana.map((item) => item.valor_dolares));
   const clientesDespachados = sum(sortedPlan.map((item) => item.clientes_total)) + sum(zonasExterno.map((item) => item.clientes_total));
   const clientesPendientes = sum(zonasManana.map((item) => item.clientes_total));
   const totalVehiclesAvailable = fleet.unidadesDisponibles.length;
+  const porcentajeUtilidadReferencia = [...zoneMap.values()].find((zone) => Number(zone.porcentaje_utilidad) > 0)?.porcentaje_utilidad || 0;
 
   return {
     fecha: new Date(),
     zonas_input: [...zoneMap.values()],
     costo_externo_referencia: externalCost,
+    porcentaje_utilidad_referencia: porcentajeUtilidadReferencia,
     plan: sortedPlan,
     zonas_externo: zonasExterno,
     zonas_mañana: zonasManana,
@@ -347,7 +363,9 @@ function buildStructuredResult({ plan, zonasExterno, zonasManana }, zoneMap, fle
       busqueda_completa: !diagnostics.aborted,
     },
     resumen: {
+      facturado_despachado_hoy: round(facturadoDespachadoHoy, 2),
       valor_despachado_hoy: round(valorDespachadoHoy, 2),
+      facturado_pendiente: round(facturadoPendiente, 2),
       valor_pendiente: round(valorPendiente, 2),
       vehiculos_usados: sortedPlan.length,
       vehiculos_libres: Math.max(totalVehiclesAvailable - sortedPlan.length, 0),

@@ -1,26 +1,12 @@
-const MAIN_ZONES = [
-  { id: 'SUR', nombre: 'SUR', combina: 'CENTRO u OESTE', puedeIrCon: ['CENTRO', 'OESTE'], solo: false },
-  { id: 'CENTRO', nombre: 'CENTRO', combina: 'NORTE o SUR', puedeIrCon: ['NORTE', 'SUR'], solo: false },
-  { id: 'OESTE', nombre: 'OESTE', combina: 'NORTE o SUR', puedeIrCon: ['NORTE', 'SUR'], solo: false },
-  { id: 'NORTE', nombre: 'NORTE', combina: 'CENTRO u OESTE', puedeIrCon: ['CENTRO', 'OESTE'], solo: false },
-  { id: 'OJEDA', nombre: 'OJEDA', combina: 'Puede salir sola o con MENEGRANDE y BACHAQUERO', puedeIrCon: ['MENEGRANDE', 'BACHAQUERO'], solo: false },
-  { id: 'MENEGRANDE', nombre: 'MENEGRANDE', combina: 'Siempre con OJEDA si OJEDA esta activa. No apta para camioneta', puedeIrCon: ['OJEDA'], solo: false },
-  { id: 'CABIMAS', nombre: 'CABIMAS', combina: 'Sale sola', puedeIrCon: [], solo: true },
-  { id: 'BACHAQUERO', nombre: 'BACHAQUERO', combina: 'Siempre con OJEDA si OJEDA esta activa', puedeIrCon: ['OJEDA'], solo: false },
-];
+const MAIN_ZONES = [];
 
-const SOLO_ZONES = [
-  { id: 'MACHIQUES', nombre: 'MACHIQUES', detalle: 'Zona independiente / solo camión', puedeIrCon: [], solo: true },
-  { id: 'PUERTOS', nombre: 'PUERTOS', detalle: 'Zona independiente', puedeIrCon: [], solo: true },
-  { id: 'CONCEPCION', nombre: 'CONCEPCIÓN', detalle: 'Zona independiente', puedeIrCon: [], solo: true },
-  { id: 'MARA', nombre: 'MARA', detalle: 'Zona independiente / solo camión', puedeIrCon: [], solo: true },
-];
+const SOLO_ZONES = [];
 
-const PRIORITY_WEIGHTS = { NORTE: 4, OESTE: 3, SUR: 2, CENTRO: 1 };
-const DEDICATED_ZONES = ['MACHIQUES', 'PUERTOS', 'CONCEPCIÓN', 'MARA'];
-const VAN_RESTRICTED_ZONES = ['MENEGRANDE', 'MACHIQUES', 'MARA'];
-const OJEDA_ALLOWED_PARTNERS = ['CABIMAS', 'MENEGRANDE', 'BACHAQUERO'];
-const FIXED_INCOMPATIBLE_PAIRS = [['CENTRO', 'OESTE']];
+const PRIORITY_WEIGHTS = {};
+const DEDICATED_ZONES = [];
+const VAN_RESTRICTED_ZONES = [];
+const OJEDA_ALLOWED_PARTNERS = [];
+const FIXED_INCOMPATIBLE_PAIRS = [];
 
 function buildDispatchZoneConfigPayload() {
   const allZones = [...MAIN_ZONES, ...SOLO_ZONES];

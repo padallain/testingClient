@@ -2,13 +2,24 @@ const path = require('path');
 const { calculateOptimalDispatch, DEFAULT_FLEET } = require('../services/optimizador');
 const { getDispatchTerritoryConfig } = require('../services/dispatchTerritoryConfig');
 
-function buildLegacyZones(zonas) {
+function normalizeProfitPercentage(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 100;
+  }
+
+  return Math.min(Math.max(parsed, 0), 100);
+}
+
+function buildLegacyZones(zonas, porcentajeUtilidad) {
   return Object.entries(zonas || {}).map(([nombre, data]) => ({
     id: data?.id || nombre,
     nombre,
     clientes: Number(data?.clientes) || 0,
     cajas: Number(data?.cajas) || 0,
-    valor_dolares: Number(data?.valor) || 0,
+    valor_facturado_dolares: Number(data?.valor) || 0,
+    valor_dolares: (Number(data?.valor) || 0) * (porcentajeUtilidad / 100),
+    porcentaje_utilidad: porcentajeUtilidad,
     kg: Number(data?.peso) || 0,
   }));
 }
@@ -20,6 +31,7 @@ function buildLegacyAssignments(result, externalCost) {
     zonas: item.zonas,
     peso: item.kg_total,
     valor: item.valor_total_dolares,
+    valorFacturado: item.valor_facturado_total_dolares,
     clientes: item.clientes_total,
     cajas: item.cajas_total,
     estado: 'asignado',
@@ -32,6 +44,7 @@ function buildLegacyAssignments(result, externalCost) {
     zonas: item.zonas,
     peso: item.kg_total,
     valor: item.valor_dolares,
+    valorFacturado: item.valor_facturado_dolares,
     clientes: item.clientes_total,
     cajas: item.cajas_total,
     estado: 'externo',
@@ -46,6 +59,7 @@ function buildLegacyAssignments(result, externalCost) {
     zonas: item.zonas,
     peso: item.kg_total,
     valor: item.valor_dolares,
+    valorFacturado: item.valor_facturado_dolares,
     clientes: item.clientes_total,
     cajas: item.cajas_total,
     estado: 'posponer',
@@ -73,14 +87,15 @@ exports.getDispatchConfig = (req, res) => {
 
 exports.calculateDispatch = (req, res) => {
   try {
-    const { zonas, costoExterno, vehiculos, configZonas } = req.body || {};
+    const { zonas, costoExterno, vehiculos, configZonas, porcentajeUtilidad } = req.body || {};
 
     if (!zonas || typeof zonas !== 'object') {
       return res.status(400).json({ error: 'Se requiere el objeto "zonas"' });
     }
 
     const externalCost = Number(costoExterno) || 0;
-    const normalizedZones = buildLegacyZones(zonas).filter((zone) => zone.kg > 0 || zone.valor_dolares > 0 || zone.clientes > 0 || zone.cajas > 0);
+    const effectiveProfitPercentage = normalizeProfitPercentage(porcentajeUtilidad);
+    const normalizedZones = buildLegacyZones(zonas, effectiveProfitPercentage).filter((zone) => zone.kg > 0 || zone.valor_dolares > 0 || zone.clientes > 0 || zone.cajas > 0);
 
     if (!normalizedZones.length) {
       return res.status(400).json({ error: 'No hay zonas activas con datos' });
@@ -99,6 +114,7 @@ exports.calculateDispatch = (req, res) => {
       success: true,
       fecha: result.fecha,
       costoExterno: externalCost,
+      porcentajeUtilidadReferencia: effectiveProfitPercentage,
       zonasActivas: normalizedZones.map((zone) => zone.nombre),
       asignaciones,
       recomendaciones: result.recomendaciones,
@@ -110,7 +126,9 @@ exports.calculateDispatch = (req, res) => {
         vehiculosSinUsar: result.resumen.vehiculos_propios_habilitados - result.resumen.vehiculos_propios_usados,
         externosRequeridos: result.zonas_externo.length,
         rutasPospuestas: result.zonas_mañana.length,
+        totalFacturadoDespachado: result.resumen.facturado_despachado_hoy,
         totalValorDespachado: result.resumen.valor_despachado_hoy,
+        totalFacturadoPospuesto: result.resumen.facturado_pendiente,
         totalValorPospuesto: result.resumen.valor_pendiente,
         totalClientesDespachados: result.resumen.clientes_despachados,
         totalClientesPospuestos: result.resumen.clientes_pendientes,
