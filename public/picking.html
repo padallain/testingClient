@@ -91,6 +91,23 @@
     .status { min-height: 24px; color: var(--muted); font-weight: 600; }
     .status.error { color: var(--danger); }
 
+    .session-pill {
+      display: flex;
+      align-items: center;
+      min-height: 48px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.92);
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .session-pill.error {
+      border-color: rgba(180,35,24,0.35);
+      color: var(--danger);
+    }
+
     .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
     .metric {
       border: 1px solid var(--line);
@@ -140,8 +157,8 @@
         <div class="stack">
           <div class="grid-3">
             <label>
-              ID responsable
-              <input id="responsable-id" type="text" placeholder="Ej: ALM-01">
+              Almacenista en sesion
+              <div id="session-user" class="session-pill">Cargando sesion...</div>
             </label>
             <label>
               Numero pedido
@@ -238,6 +255,8 @@
   <script>
     const saveStatus = document.getElementById('save-status');
     const summaryStatus = document.getElementById('summary-status');
+    const sessionUserNode = document.getElementById('session-user');
+    let sessionResponsibleId = '';
 
     function setToday() {
       const today = new Date().toISOString().slice(0, 10);
@@ -255,15 +274,36 @@
       return new Intl.NumberFormat('es-VE').format(Number(value) || 0);
     }
 
+    async function loadSessionUser() {
+      try {
+        const response = await fetch('/session');
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok || !data?.authenticated) {
+          sessionResponsibleId = '';
+          sessionUserNode.textContent = 'Sesion no disponible';
+          sessionUserNode.classList.add('error');
+          return;
+        }
+
+        sessionResponsibleId = String(data.user?.username || data.user?.email || data.user?.id || '').trim().toUpperCase();
+        sessionUserNode.textContent = sessionResponsibleId || 'Sesion no disponible';
+        sessionUserNode.classList.toggle('error', !sessionResponsibleId);
+      } catch (error) {
+        sessionResponsibleId = '';
+        sessionUserNode.textContent = 'Sesion no disponible';
+        sessionUserNode.classList.add('error');
+      }
+    }
+
     async function savePicking() {
       const payload = {
-        responsableId: document.getElementById('responsable-id').value.trim(),
         numeroPedido: document.getElementById('numero-pedido').value.trim(),
         numeroCajas: Number(document.getElementById('numero-cajas').value) || 0,
       };
 
-      if (!payload.responsableId || !payload.numeroPedido || !payload.numeroCajas) {
-        setStatus(saveStatus, 'Completa responsable, pedido y cajas.', true);
+      if (!sessionResponsibleId || !payload.numeroPedido || !payload.numeroCajas) {
+        setStatus(saveStatus, 'Necesitas una sesion activa, pedido y cajas.', true);
         return;
       }
 
@@ -406,6 +446,7 @@
     document.getElementById('load-summary').addEventListener('click', loadSummary);
     document.getElementById('load-recent').addEventListener('click', loadRecent);
     setToday();
+    loadSessionUser();
   </script>
 </body>
 </html>

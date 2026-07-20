@@ -15,6 +15,16 @@ function parsePositiveInteger(value) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
 }
 
+function resolveResponsibleId(req) {
+  const sessionUser = req.user || req.session?.user || null;
+
+  if (sessionUser) {
+    return normalizeResponsibleId(sessionUser.username || sessionUser.email || sessionUser.id);
+  }
+
+  return '';
+}
+
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -49,13 +59,13 @@ function parseDateRange(query = {}) {
 
 async function createPickingReport(req, res) {
   try {
-    const responsableId = normalizeResponsibleId(req.body?.responsableId);
+    const responsableId = resolveResponsibleId(req);
     const numeroPedido = normalizeOrderNumber(req.body?.numeroPedido);
     const numeroCajas = parsePositiveInteger(req.body?.numeroCajas);
 
     if (!responsableId || !numeroPedido || !numeroCajas) {
       return res.status(400).json({
-        message: 'responsableId, numeroPedido y numeroCajas son obligatorios.',
+        message: 'Se requiere una sesion valida del almacenista, numeroPedido y numeroCajas.',
       });
     }
 

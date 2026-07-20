@@ -13,6 +13,24 @@ const normalizeChecklist = (checklist) =>
 			}))
 		: [];
 
+const resolveDriverName = (req) => {
+	const sessionUser = req.user || req.session?.user || null;
+
+	if (!sessionUser) {
+		return "";
+	}
+
+	if (typeof sessionUser.username === "string" && sessionUser.username.trim()) {
+		return sessionUser.username.trim();
+	}
+
+	if (typeof sessionUser.email === "string" && sessionUser.email.trim()) {
+		return sessionUser.email.trim();
+	}
+
+	return typeof sessionUser.id === "string" ? sessionUser.id.trim() : "";
+};
+
 const hasInvalidChecklistItem = (checklist) =>
 	checklist.find(
 		(item) =>
@@ -46,11 +64,12 @@ const getRecentDailyChecks = async (req, res) => {
 
 const createDailyCheck = async (req, res) => {
 	try {
-		const { chofer, placa, modelo, anio, checklist, observaciones } = req.body;
+		const { placa, modelo, anio, checklist, observaciones } = req.body;
+		const chofer = resolveDriverName(req);
 
 		if (!chofer || !placa || !modelo || !anio) {
 			return res.status(400).json({
-				message: "Chofer, placa, modelo y anio son obligatorios",
+				message: "Se requiere una sesion valida del chofer, placa, modelo y anio.",
 			});
 		}
 
