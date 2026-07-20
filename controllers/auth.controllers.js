@@ -1,8 +1,13 @@
 const User = require("../models/user.model");
-const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 
-const SECRET_KEY = process.env.SECRET_KEY || "default_secret";
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const buildSessionUser = (user) => ({
+  id: user._id,
+  username: user.username,
+  email: user.email,
+});
 
 // REGISTRO DE USUARIO (AUTENTICACIÓN)
 const register = async (req, res) => {
@@ -28,13 +33,7 @@ const register = async (req, res) => {
 
     await newUser.save();
 
-    // Generar token de verificación
-    const token = jwt.sign({ username: newUser.username, email: newUser.email }, SECRET_KEY, { expiresIn: "1d" });
-
-    // Enviar correo de verificación
-    //await sendVerificationEmail(newUser.email, token);
-
-    res.status(201).json({ message: 'User registered successfully. Please check your email to verify your account.' });
+    res.status(201).json({ message: 'User registered successfully.' });
   } catch (err) {
     console.log("Error en el registro del usuario:", err);
     res.status(500).json({ message: 'Error registering user' });
@@ -65,33 +64,70 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Generar token JWT
-    const token = jwt.sign({ username: user.username, email: user.email }, SECRET_KEY, { expiresIn: "8h" });
+    req.session.regenerate((sessionError) => {
+      if (sessionError) {
+        console.log("Error regenerating session:", sessionError);
+        return res.status(500).json({ message: "Error logging in" });
+      }
 
-    res.status(200).json({ token });
+      req.session.user = buildSessionUser(user);
+      req.session.cookie.maxAge = SESSION_MAX_AGE_MS;
+
+      req.session.save((saveError) => {
+        if (saveError) {
+          console.log("Error saving session:", saveError);
+          return res.status(500).json({ message: "Error logging in" });
+        }
+
+        return res.status(200).json({
+          message: "Login successful",
+          user: req.session.user,
+        });
+      });
+    });
   } catch (err) {
     console.log("Error en login:", err);
     res.status(500).json({ message: "Error logging in" });
   }
 };
 
+const getSession = (req, res) => {
+  if (!req.session.user) {
+    return res.status(401).json({ authenticated: false });
+  }
+
+  return res.status(200).json({
+    authenticated: true,
+    user: req.session.user,
+  });
+};
+
+const logout = (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.log("Error destroying session:", err);
+      return res.status(500).json({ message: "Error logging out" });
+    }
+
+    res.clearCookie("connect.sid");
+    return res.status(200).json({ message: "Logout successful" });
+  });
+};
+
 // MIDDLEWARE DE AUTORIZACIÓN
 const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: "No token provided" });
-
-  const token = authHeader.split(" ")[1];
-  try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ message: "Invalid token" });
+  if (!req.session.user) {
+    return res.status(401).json({ message: "Authentication required" });
   }
+
+  req.user = req.session.user;
+  next();
 };
 
 module.exports = {
   register,
   login,
+  getSession,
+  logout,
   authMiddleware,
 };
