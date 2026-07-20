@@ -6,12 +6,22 @@ const { connectToDatabase } = require("./db"); // Importa la funciÃ³n de conexiÃ
 const startRoutes = require("./routes/start.routes");
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const isProduction = process.env.NODE_ENV === "production";
+const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE
+  ? process.env.SESSION_COOKIE_SECURE === "true"
+  : isProduction;
+const sessionCookieSameSite = process.env.SESSION_COOKIE_SAME_SITE
+  || (sessionCookieSecure ? "none" : "lax");
 
 const app = express();
 const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+
+if (sessionCookieSecure) {
+  app.set("trust proxy", 1);
+}
 
 // Aplica el middleware cors a todas las rutas
 app.use(cors({
@@ -38,9 +48,9 @@ app.use(session({
     saveUninitialized: false,
     rolling: false,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      secure: sessionCookieSecure,
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: sessionCookieSameSite,
       maxAge: SESSION_MAX_AGE_MS,
     },
 }));
