@@ -8,6 +8,7 @@ const startRoutes = require("./routes/start.routes");
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "https://easymove.netlify.app",
 ];
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -42,7 +43,9 @@ function isAllowedOrigin(origin) {
 
   try {
     const url = new URL(normalizedOrigin);
-    return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    return url.hostname === "localhost"
+      || url.hostname === "127.0.0.1"
+      || url.hostname === "easymove.netlify.app";
   } catch (error) {
     return false;
   }
