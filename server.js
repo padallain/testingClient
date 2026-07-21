@@ -9,6 +9,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "https://easymove.netlify.app",
+  "https://gleaming-meerkat-1af574.netlify.app",
 ];
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -23,6 +24,7 @@ const sessionCookieSameSite = process.env.SESSION_COOKIE_SAME_SITE
 const app = express();
 const allowedOrigins = [...new Set([
   ...DEFAULT_ALLOWED_ORIGINS,
+  (process.env.FRONTEND_PUBLIC_ORIGIN || "").trim(),
   ...(process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -46,7 +48,8 @@ function isAllowedOrigin(origin) {
     const url = new URL(normalizedOrigin);
     return url.hostname === "localhost"
       || url.hostname === "127.0.0.1"
-      || url.hostname === "easymove.netlify.app";
+      || url.hostname === "easymove.netlify.app"
+      || url.hostname === "gleaming-meerkat-1af574.netlify.app";
   } catch (error) {
     return false;
   }
