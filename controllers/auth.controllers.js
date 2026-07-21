@@ -1,16 +1,60 @@
 const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || "makeroute.sid";
 const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
 const SESSION_COOKIE_SAME_SITE = process.env.SESSION_COOKIE_SAME_SITE || (SESSION_COOKIE_SECURE ? "none" : "lax");
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || process.env.SESSION_SECRET || process.env.SECRET_KEY || "change_this_auth_token_secret";
 
 const buildSessionUser = (user) => ({
   id: user._id,
   username: user.username,
   email: user.email,
 });
+
+const buildAuthToken = (user) => jwt.sign({
+  sub: String(user.id),
+  username: user.username,
+  email: user.email,
+}, AUTH_TOKEN_SECRET, {
+  expiresIn: Math.floor(SESSION_MAX_AGE_MS / 1000),
+});
+
+const extractBearerToken = (req) => {
+  const authHeader = req.headers?.authorization;
+
+  if (typeof authHeader !== "string") {
+    return "";
+  }
+
+  const [scheme, token] = authHeader.split(" ");
+  return scheme === "Bearer" && token ? token.trim() : "";
+};
+
+const resolveAuthenticatedUser = (req) => {
+  if (req.session?.user) {
+    return req.session.user;
+  }
+
+  const token = extractBearerToken(req);
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const payload = jwt.verify(token, AUTH_TOKEN_SECRET);
+    return {
+      id: payload.sub,
+      username: payload.username,
+      email: payload.email,
+    };
+  } catch (_error) {
+    return null;
+  }
+};
 
 // REGISTRO DE USUARIO (AUTENTICACIÓN)
 const register = async (req, res) => {
@@ -82,9 +126,13 @@ const login = async (req, res) => {
           return res.status(500).json({ message: "Error logging in" });
         }
 
+        const sessionUser = req.session.user;
+        const authToken = buildAuthToken(sessionUser);
+
         return res.status(200).json({
           message: "Login successful",
-          user: req.session.user,
+          user: sessionUser,
+          token: authToken,
         });
       });
     });
@@ -95,13 +143,15 @@ const login = async (req, res) => {
 };
 
 const getSession = (req, res) => {
-  if (!req.session.user) {
+  const authenticatedUser = resolveAuthenticatedUser(req);
+
+  if (!authenticatedUser) {
     return res.status(401).json({ authenticated: false });
   }
 
   return res.status(200).json({
     authenticated: true,
-    user: req.session.user,
+    user: authenticatedUser,
   });
 };
 
@@ -124,11 +174,13 @@ const logout = (req, res) => {
 
 // MIDDLEWARE DE AUTORIZACIÓN
 const authMiddleware = (req, res, next) => {
-  if (!req.session.user) {
+  const authenticatedUser = resolveAuthenticatedUser(req);
+
+  if (!authenticatedUser) {
     return res.status(401).json({ message: "Authentication required" });
   }
 
-  req.user = req.session.user;
+  req.user = authenticatedUser;
   next();
 };
 
