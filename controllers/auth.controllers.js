@@ -2,6 +2,9 @@ const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || "makeroute.sid";
+const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
+const SESSION_COOKIE_SAME_SITE = process.env.SESSION_COOKIE_SAME_SITE || (SESSION_COOKIE_SECURE ? "none" : "lax");
 
 const buildSessionUser = (user) => ({
   id: user._id,
@@ -109,7 +112,12 @@ const logout = (req, res) => {
       return res.status(500).json({ message: "Error logging out" });
     }
 
-    res.clearCookie("connect.sid");
+    res.clearCookie(SESSION_COOKIE_NAME, {
+      path: "/",
+      httpOnly: true,
+      sameSite: SESSION_COOKIE_SAME_SITE,
+      secure: SESSION_COOKIE_SECURE,
+    });
     return res.status(200).json({ message: "Logout successful" });
   });
 };

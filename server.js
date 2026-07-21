@@ -13,6 +13,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const isProduction = process.env.NODE_ENV === "production";
+const sessionCookieName = process.env.SESSION_COOKIE_NAME || "makeroute.sid";
 const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE
   ? process.env.SESSION_COOKIE_SECURE === "true"
   : isProduction;
@@ -62,6 +63,7 @@ if (isProduction && hasOnlyLocalOrigins) {
 console.log("[config] auth/session", {
   nodeEnv: process.env.NODE_ENV || "development",
   allowedOrigins,
+  sessionCookieName,
   sessionCookieSecure,
   sessionCookieSameSite,
 });
@@ -88,11 +90,15 @@ app.use((req, res, next) => {
 });
 
 app.use(session({
+    name: sessionCookieName,
     secret: process.env.SESSION_SECRET || "change_this_session_secret",
+    proxy: sessionCookieSecure,
     resave: false,
     saveUninitialized: false,
     rolling: false,
+    unset: "destroy",
     cookie: {
+      path: "/",
       secure: sessionCookieSecure,
       httpOnly: true,
       sameSite: sessionCookieSameSite,
