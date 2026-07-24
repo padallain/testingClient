@@ -40,6 +40,24 @@ const buildPasswordResetMessage = ({ username, code }) => ({
   `,
 });
 
+const resolvePasswordResetRequestErrorMessage = (error) => {
+  const message = String(error?.message || "");
+
+  if (message.startsWith("EMAIL_CONFIG_INVALID:")) {
+    return "El correo del servidor no esta configurado correctamente.";
+  }
+
+  if (message.startsWith("EMAIL_AUTH_FAILED:")) {
+    return "El servidor rechazo las credenciales del correo. Revisa EMAIL_USER y EMAIL_PASS.";
+  }
+
+  if (message.startsWith("EMAIL_TIMEOUT:")) {
+    return "El proveedor de correo no respondio a tiempo. Revisa EMAIL_SERVICE o EMAIL_HOST.";
+  }
+
+  return "No se pudo enviar el codigo de recuperacion.";
+};
+
 const buildAuthToken = (user) => jwt.sign({
   sub: String(user.id),
   username: user.username,
@@ -236,7 +254,7 @@ const requestPasswordResetCode = async (req, res) => {
     });
   } catch (error) {
     console.log("Error requesting password reset code:", error);
-    return res.status(500).json({ message: "No se pudo enviar el codigo de recuperacion." });
+    return res.status(500).json({ message: resolvePasswordResetRequestErrorMessage(error) });
   }
 };
 
