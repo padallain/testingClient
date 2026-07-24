@@ -1,8 +1,10 @@
 const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { sendEmail } = require("../services/sendEmail");
 
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_CODE_TTL_MS = 15 * 60 * 1000;
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || "makeroute.sid";
 const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
 const SESSION_COOKIE_SAME_SITE = process.env.SESSION_COOKIE_SAME_SITE || (SESSION_COOKIE_SECURE ? "none" : "lax");
@@ -12,6 +14,30 @@ const buildSessionUser = (user) => ({
   id: user._id,
   username: user.username,
   email: user.email,
+});
+
+const generatePasswordResetCode = () => String(Math.floor(100000 + (Math.random() * 900000)));
+
+const buildPasswordResetMessage = ({ username, code }) => ({
+  subject: "Codigo de recuperacion de contrasena",
+  text: [
+    `Hola ${username || "usuario"},`,
+    "",
+    `Tu codigo de recuperacion es: ${code}`,
+    "",
+    "Este codigo vence en 15 minutos.",
+    "Si no solicitaste este cambio, ignora este correo.",
+  ].join("\n"),
+  html: `
+    <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+      <h2 style="margin-bottom: 12px;">Recuperacion de contrasena</h2>
+      <p>Hola ${username || "usuario"},</p>
+      <p>Tu codigo de recuperacion es:</p>
+      <p style="font-size: 28px; font-weight: 700; letter-spacing: 4px; margin: 18px 0;">${code}</p>
+      <p>Este codigo vence en 15 minutos.</p>
+      <p>Si no solicitaste este cambio, ignora este correo.</p>
+    </div>
+  `,
 });
 
 const buildAuthToken = (user) => jwt.sign({
@@ -172,6 +198,116 @@ const logout = (req, res) => {
   });
 };
 
+const requestPasswordResetCode = async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({ message: "Debes indicar el correo asociado a la cuenta." });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(200).json({
+        message: "Si el correo existe en el sistema, enviaremos un codigo de recuperacion.",
+      });
+    }
+
+    const code = generatePasswordResetCode();
+    user.passwordResetCode = code;
+    user.passwordResetCodeExpiresAt = new Date(Date.now() + PASSWORD_RESET_CODE_TTL_MS);
+    await user.save();
+
+    const message = buildPasswordResetMessage({
+      username: user.username,
+      code,
+    });
+
+    await sendEmail({
+      to: user.email,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+    });
+
+    return res.status(200).json({
+      message: "Si el correo existe en el sistema, enviaremos un codigo de recuperacion.",
+    });
+  } catch (error) {
+    console.log("Error requesting password reset code:", error);
+    return res.status(500).json({ message: "No se pudo enviar el codigo de recuperacion." });
+  }
+};
+
+const verifyPasswordResetCode = async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const code = String(req.body?.code || "").trim();
+
+    if (!email || !code) {
+      return res.status(400).json({ message: "Correo y codigo son obligatorios." });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user || !user.passwordResetCode || !user.passwordResetCodeExpiresAt) {
+      return res.status(400).json({ message: "El codigo de recuperacion es invalido o ya no esta disponible." });
+    }
+
+    const isExpired = user.passwordResetCodeExpiresAt.getTime() < Date.now();
+    const isCodeMismatch = user.passwordResetCode !== code;
+
+    if (isExpired || isCodeMismatch) {
+      return res.status(400).json({ message: "El codigo de recuperacion es invalido o ha vencido." });
+    }
+
+    return res.status(200).json({ message: "Codigo validado correctamente." });
+  } catch (error) {
+    console.log("Error verifying password reset code:", error);
+    return res.status(500).json({ message: "No se pudo validar el codigo de recuperacion." });
+  }
+};
+
+const resetPasswordWithCode = async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const code = String(req.body?.code || "").trim();
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ message: "Correo, codigo y nueva contrasena son obligatorios." });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "La nueva contrasena debe tener al menos 6 caracteres." });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user || !user.passwordResetCode || !user.passwordResetCodeExpiresAt) {
+      return res.status(400).json({ message: "El codigo de recuperacion es invalido o ya no esta disponible." });
+    }
+
+    const isExpired = user.passwordResetCodeExpiresAt.getTime() < Date.now();
+    const isCodeMismatch = user.passwordResetCode !== code;
+
+    if (isExpired || isCodeMismatch) {
+      return res.status(400).json({ message: "El codigo de recuperacion es invalido o ha vencido." });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.passwordResetCode = null;
+    user.passwordResetCodeExpiresAt = null;
+    await user.save();
+
+    return res.status(200).json({ message: "Contrasena actualizada correctamente." });
+  } catch (error) {
+    console.log("Error resetting password with code:", error);
+    return res.status(500).json({ message: "No se pudo actualizar la contrasena." });
+  }
+};
+
 // MIDDLEWARE DE AUTORIZACIÓN
 const authMiddleware = (req, res, next) => {
   const authenticatedUser = resolveAuthenticatedUser(req);
@@ -189,5 +325,8 @@ module.exports = {
   login,
   getSession,
   logout,
+  requestPasswordResetCode,
+  verifyPasswordResetCode,
+  resetPasswordWithCode,
   authMiddleware,
 };

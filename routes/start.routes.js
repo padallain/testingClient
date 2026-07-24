@@ -1,5 +1,5 @@
 const express = require('express');
-const { register, login, getSession, logout, authMiddleware } = require('../controllers/auth.controllers');
+const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, authMiddleware } = require('../controllers/auth.controllers');
 const { makeRoute, getDriverCurrentRoute, listRouteAssignments, listRouteDispatchStatuses, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
@@ -37,6 +37,9 @@ router.post('/register', register);
 router.post('/login', login);
 router.get('/session', getSession);
 router.post('/logout', logout);
+router.post('/recover-password/request-code', requestPasswordResetCode);
+router.post('/recover-password/verify-code', verifyPasswordResetCode);
+router.post('/recover-password/reset', resetPasswordWithCode);
 
 router.use(authMiddleware);
 
