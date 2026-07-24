@@ -6,7 +6,7 @@ const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDai
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const { getDispatchPage, getDispatchConfig, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
-const { createPickingReport, listRecentPickingReports, getPickingSummary, getPickingReportById, getPickingReportByOrderNumber, createPickingErrorReport } = require('../controllers/picking.controllers');
+const { createPickingReport, listRecentPickingReports, getPickingSummary, getPickingReportById, getPickingReportByOrderNumber, createPickingErrorReport, updatePickingReport, deletePickingReport } = require('../controllers/picking.controllers');
 const despachoRoutes = require('./despacho.routes');
 const router = express.Router();
 
@@ -92,6 +92,8 @@ router.get('/picking', (req, res) => {
 router.post('/picking-reports', createPickingReport);
 router.get('/picking-reports/:id', getPickingReportById);
 router.get('/internal/admin/picking-reports', requireAdminDeleteKey, listRecentPickingReports);
+router.patch('/internal/admin/picking-reports/:id', requireAdminDeleteKey, updatePickingReport);
+router.delete('/internal/admin/picking-reports/:id', requireAdminDeleteKey, deletePickingReport);
 router.get('/internal/admin/picking-reports/order/:numeroPedido', requireAdminDeleteKey, getPickingReportByOrderNumber);
 router.post('/internal/admin/picking-reports/order/:numeroPedido/errors', requireAdminDeleteKey, createPickingErrorReport);
 router.get('/internal/admin/picking-reports/summary', requireAdminDeleteKey, getPickingSummary);

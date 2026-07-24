@@ -316,6 +316,105 @@ async function createPickingErrorReport(req, res) {
   }
 }
 
+async function updatePickingReport(req, res) {
+  try {
+    const { id } = req.params;
+    const responsableId = normalizeResponsibleId(req.body?.responsableId);
+    const numeroPedido = normalizeOrderNumber(req.body?.numeroPedido);
+    const numeroCajas = parsePositiveInteger(req.body?.numeroCajas);
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'El id del picking no es valido.' });
+    }
+
+    if (!responsableId || !numeroPedido || !numeroCajas) {
+      return res.status(400).json({
+        message: 'responsableId, numeroPedido y numeroCajas son obligatorios.',
+      });
+    }
+
+    const pickingReport = await PickingReport.findById(id);
+
+    if (!pickingReport) {
+      return res.status(404).json({ message: 'Picking no encontrado.' });
+    }
+
+    const duplicatedOrder = await PickingReport.findOne({
+      numeroPedido,
+      _id: { $ne: id },
+    }).lean();
+
+    if (duplicatedOrder) {
+      return res.status(409).json({
+        message: 'Ya existe otro picking registrado con ese numero de pedido.',
+      });
+    }
+
+    pickingReport.responsableId = responsableId;
+    pickingReport.numeroPedido = numeroPedido;
+    pickingReport.numeroCajas = numeroCajas;
+
+    await pickingReport.save();
+
+    await PickingErrorReport.updateMany(
+      { pickingReportId: pickingReport._id },
+      {
+        $set: {
+          numeroPedido: pickingReport.numeroPedido,
+          responsableId: pickingReport.responsableId,
+          numeroCajas: pickingReport.numeroCajas,
+        },
+      },
+    );
+
+    const totalErrores = await PickingErrorReport.countDocuments({
+      pickingReportId: pickingReport._id,
+    });
+
+    return res.status(200).json({
+      message: 'Picking actualizado correctamente.',
+      report: {
+        ...pickingReport.toObject(),
+        totalErrores,
+      },
+    });
+  } catch (error) {
+    console.error('Error actualizando picking:', error);
+    return res.status(500).json({ message: 'Error actualizando el picking.' });
+  }
+}
+
+async function deletePickingReport(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'El id del picking no es valido.' });
+    }
+
+    const pickingReport = await PickingReport.findById(id);
+
+    if (!pickingReport) {
+      return res.status(404).json({ message: 'Picking no encontrado.' });
+    }
+
+    const deletedErrors = await PickingErrorReport.deleteMany({
+      pickingReportId: pickingReport._id,
+    });
+
+    await pickingReport.deleteOne();
+
+    return res.status(200).json({
+      message: 'Picking eliminado correctamente.',
+      report: pickingReport,
+      deletedErrorReports: deletedErrors.deletedCount || 0,
+    });
+  } catch (error) {
+    console.error('Error eliminando picking:', error);
+    return res.status(500).json({ message: 'Error eliminando el picking.' });
+  }
+}
+
 module.exports = {
   createPickingReport,
   listRecentPickingReports,
@@ -323,4 +422,6 @@ module.exports = {
   getPickingReportById,
   getPickingReportByOrderNumber,
   createPickingErrorReport,
+  updatePickingReport,
+  deletePickingReport,
 };
