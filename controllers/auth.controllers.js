@@ -9,6 +9,11 @@ const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || "makeroute.sid";
 const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
 const SESSION_COOKIE_SAME_SITE = process.env.SESSION_COOKIE_SAME_SITE || (SESSION_COOKIE_SECURE ? "none" : "lax");
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || process.env.SESSION_SECRET || process.env.SECRET_KEY || "change_this_auth_token_secret";
+const USERNAME_COLLATION = { locale: "en", strength: 3 };
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+const normalizeUsername = (value) => (typeof value === "string" ? value.trim() : "");
+const normalizeEmail = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const buildSessionUser = (user) => ({
   id: user._id,
@@ -44,18 +49,41 @@ const resolvePasswordResetRequestErrorMessage = (error) => {
   const message = String(error?.message || "");
 
   if (message.startsWith("EMAIL_CONFIG_INVALID:")) {
-    return "El correo del servidor no esta configurado correctamente.";
+    return "El correo del servidor no esta configurado correctamente. Revisa RESEND_API_KEY y EMAIL_FROM.";
   }
 
   if (message.startsWith("EMAIL_AUTH_FAILED:")) {
-    return "El servidor rechazo las credenciales del correo. Revisa EMAIL_USER y EMAIL_PASS.";
+    return "El proveedor de correo rechazo las credenciales. Revisa RESEND_API_KEY o las credenciales SMTP si sigues usando SMTP.";
   }
 
   if (message.startsWith("EMAIL_TIMEOUT:")) {
-    return "El proveedor de correo no respondio a tiempo. Revisa EMAIL_SERVICE o EMAIL_HOST.";
+    return "El proveedor de correo no respondio a tiempo. Revisa Resend, la red del servidor o la configuracion SMTP de respaldo.";
   }
 
   return "No se pudo enviar el codigo de recuperacion.";
+};
+
+const resolveRegisterErrorMessage = (error) => {
+  if (error?.code === 11000) {
+    if (error?.keyPattern?.username) {
+      return "Ese username ya existe. Se diferencia entre mayusculas y minusculas.";
+    }
+
+    if (error?.keyPattern?.email) {
+      return "Ese correo ya existe.";
+    }
+  }
+
+  return "Error registering user";
+};
+
+const canUseDevelopmentRecoveryFallback = (error) => {
+  if (IS_PRODUCTION) {
+    return false;
+  }
+
+  const message = String(error?.message || "");
+  return message.startsWith("EMAIL_CONFIG_INVALID:") || String(process.env.EMAIL_LOG_ONLY || "false") === "true";
 };
 
 const buildAuthToken = (user) => jwt.sign({
@@ -103,15 +131,22 @@ const resolveAuthenticatedUser = (req) => {
 // REGISTRO DE USUARIO (AUTENTICACIÓN)
 const register = async (req, res) => {
   try {
-    const { username, password, email } = req.body;
+    const username = normalizeUsername(req.body?.username);
+    const password = String(req.body?.password || "");
+    const email = normalizeEmail(req.body?.email);
 
     if (!username || !password || !email) {
       return res.status(400).json({ message: 'Username, password and email are required' });
     }
 
-    const existingUser = await User.findOne({ username });
+    const existingUser = await User.findOne({ username }).collation(USERNAME_COLLATION);
     if (existingUser) {
-      return res.status(400).json({ message: 'User with this username already exists' });
+      return res.status(400).json({ message: 'Ese username ya existe. Se diferencia entre mayusculas y minusculas.' });
+    }
+
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) {
+      return res.status(400).json({ message: 'Ese correo ya existe.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -127,24 +162,24 @@ const register = async (req, res) => {
     res.status(201).json({ message: 'User registered successfully.' });
   } catch (err) {
     console.log("Error en el registro del usuario:", err);
-    res.status(500).json({ message: 'Error registering user' });
+    res.status(500).json({ message: resolveRegisterErrorMessage(err) });
   }
 };
 
 // LOGIN DE USUARIO (AUTENTICACIÓN)
 const login = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const username = normalizeUsername(req.body?.username);
+    const email = normalizeEmail(req.body?.email);
+    const password = String(req.body?.password || "");
     if ((!username && !email) || !password) {
       return res.status(400).json({ message: "Username or email and password are required" });
     }
 
     // Buscar por username o email
-    const user = await User.findOne(
-      username
-        ? { username }
-        : { email }
-    );
+    const user = username
+      ? await User.findOne({ username }).collation(USERNAME_COLLATION)
+      : await User.findOne({ email });
 
     if (!user || !user.password) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -242,12 +277,25 @@ const requestPasswordResetCode = async (req, res) => {
       code,
     });
 
-    await sendEmail({
-      to: user.email,
-      subject: message.subject,
-      text: message.text,
-      html: message.html,
-    });
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+      });
+    } catch (error) {
+      console.log("Error requesting password reset code:", error);
+
+      if (canUseDevelopmentRecoveryFallback(error)) {
+        return res.status(200).json({
+          message: "El correo no esta configurado en este entorno. Usa el codigo mostrado para continuar la prueba.",
+          devRecoveryCode: code,
+        });
+      }
+
+      throw error;
+    }
 
     return res.status(200).json({
       message: "Si el correo existe en el sistema, enviaremos un codigo de recuperacion.",
