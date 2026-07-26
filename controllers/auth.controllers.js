@@ -49,15 +49,15 @@ const resolvePasswordResetRequestErrorMessage = (error) => {
   const message = String(error?.message || "");
 
   if (message.startsWith("EMAIL_CONFIG_INVALID:")) {
-    return "El correo del servidor no esta configurado correctamente. Revisa RESEND_API_KEY y EMAIL_FROM.";
+    return "El correo del servidor no esta configurado correctamente. Revisa EMAIL_FROM y las variables SMTP.";
   }
 
   if (message.startsWith("EMAIL_AUTH_FAILED:")) {
-    return "El proveedor de correo rechazo las credenciales. Revisa RESEND_API_KEY o las credenciales SMTP si sigues usando SMTP.";
+    return "El proveedor de correo rechazo las credenciales. Revisa EMAIL_USER y EMAIL_PASS.";
   }
 
   if (message.startsWith("EMAIL_TIMEOUT:")) {
-    return "El proveedor de correo no respondio a tiempo. Revisa Resend, la red del servidor o la configuracion SMTP de respaldo.";
+    return "El proveedor de correo no respondio a tiempo. Revisa EMAIL_SERVICE, EMAIL_HOST o la red del servidor.";
   }
 
   return "No se pudo enviar el codigo de recuperacion.";
