@@ -1,4 +1,7 @@
 const nodemailer = require("nodemailer");
+const axios = require("axios");
+
+const RESEND_API_URL = "https://api.resend.com/emails";
 
 function buildConfigError(message) {
   return new Error(`EMAIL_CONFIG_INVALID: ${message}`);
@@ -47,6 +50,21 @@ function getDefaultFromAddress() {
   return process.env.EMAIL_FROM || process.env.EMAIL_USER || "no-reply@makeroute.local";
 }
 
+function hasResendConfiguration() {
+  return Boolean(String(process.env.RESEND_API_KEY || "").trim());
+}
+
+function shouldFallbackToResend(error) {
+  const disableFallback = String(process.env.EMAIL_SMTP_DISABLE_FALLBACK || "false") === "true";
+
+  if (disableFallback || !hasResendConfiguration()) {
+    return false;
+  }
+
+  const message = String(error?.message || "");
+  return message.startsWith("EMAIL_TIMEOUT:");
+}
+
 async function sendWithSmtp({ to, subject, text, html, from }) {
   const transporter = nodemailer.createTransport(buildTransportConfig());
 
@@ -71,6 +89,49 @@ async function sendWithSmtp({ to, subject, text, html, from }) {
   }
 }
 
+async function sendWithResend({ to, subject, text, html, from }) {
+  const resendApiKey = String(process.env.RESEND_API_KEY || "").trim();
+  const resendFrom = String(process.env.RESEND_FROM || from || "").trim();
+
+  if (!resendApiKey) {
+    throw buildConfigError("RESEND_API_KEY es obligatorio para enviar correo con Resend.");
+  }
+
+  if (!resendFrom) {
+    throw buildConfigError("RESEND_FROM o EMAIL_FROM es obligatorio para enviar correo con Resend.");
+  }
+
+  try {
+    await axios.post(
+      RESEND_API_URL,
+      {
+        from: resendFrom,
+        to: [to],
+        subject,
+        text,
+        html,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+        },
+        timeout: Number(process.env.RESEND_TIMEOUT_MS || 15000),
+      },
+    );
+  } catch (error) {
+    if (error?.code === "ECONNABORTED") {
+      throw new Error(`EMAIL_TIMEOUT: ${error.message}`);
+    }
+
+    const providerMessage = error?.response?.data
+      ? JSON.stringify(error.response.data)
+      : error.message;
+
+    throw new Error(`EMAIL_SEND_FAILED: ${providerMessage}`);
+  }
+}
+
 async function sendEmail({ to, subject, text, html, from = getDefaultFromAddress() }) {
   if (String(process.env.EMAIL_LOG_ONLY || "false") === "true") {
     console.log("[email] log-only password recovery delivery", {
@@ -81,7 +142,23 @@ async function sendEmail({ to, subject, text, html, from = getDefaultFromAddress
     return;
   }
 
-  await sendWithSmtp({ to, subject, text, html, from });
+  const provider = String(process.env.EMAIL_PROVIDER || "smtp").trim().toLowerCase();
+
+  if (provider === "resend") {
+    await sendWithResend({ to, subject, text, html, from });
+    return;
+  }
+
+  try {
+    await sendWithSmtp({ to, subject, text, html, from });
+  } catch (error) {
+    if (!shouldFallbackToResend(error)) {
+      throw error;
+    }
+
+    console.warn("[email] SMTP timeout detected. Falling back to Resend provider.");
+    await sendWithResend({ to, subject, text, html, from });
+  }
 }
 
 module.exports = {
