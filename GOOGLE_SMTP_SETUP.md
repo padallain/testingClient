@@ -28,6 +28,31 @@ Notas:
 - `RESEND_FROM` debe ser un remitente permitido por tu cuenta de Resend.
 - Cuando uses `EMAIL_PROVIDER=resend`, no dependes de puertos SMTP de Google.
 
+## Si quieres usar Gmail personal como remitente real (SMTP)
+
+En Render configura estas variables:
+
+```env
+EMAIL_PROVIDER=smtp
+EMAIL_SERVICE=gmail
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=465
+EMAIL_SECURE=true
+EMAIL_USER=tu_correo_gmail@gmail.com
+EMAIL_PASS=tu_app_password_de_google
+EMAIL_FROM=MakeRoute <tu_correo_gmail@gmail.com>
+EMAIL_LOG_ONLY=false
+EMAIL_CONNECTION_TIMEOUT_MS=30000
+EMAIL_GREETING_TIMEOUT_MS=30000
+EMAIL_SOCKET_TIMEOUT_MS=45000
+EMAIL_SMTP_DISABLE_FALLBACK=true
+```
+
+Notas:
+
+- `EMAIL_PASS` debe ser App Password de Google, no la clave normal.
+- Si aun asi hay timeout en Render, vuelve a `EMAIL_PROVIDER=resend` porque es una limitacion de salida SMTP del hosting.
+
 ## Como obtener `EMAIL_PASS` (App Password)
 
 1. Entra a la cuenta de Google usada en `EMAIL_USER`.

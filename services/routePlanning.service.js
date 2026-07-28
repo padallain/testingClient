@@ -314,6 +314,13 @@ const reverseRouteSegment = (route, startIndex, endIndex) => ([
   ...route.slice(endIndex + 1),
 ]);
 
+const relocateRouteNode = (route, fromIndex, toIndex) => {
+  const nextRoute = [...route];
+  const [movedNode] = nextRoute.splice(fromIndex, 1);
+  nextRoute.splice(toIndex, 0, movedNode);
+  return nextRoute;
+};
+
 const optimizeClosedRouteWithTwoOpt = (route, distanceMatrix, lockedPrefixLength = 0) => {
   if (!Array.isArray(route) || route.length < 3) {
     return route;
@@ -337,6 +344,73 @@ const optimizeClosedRouteWithTwoOpt = (route, distanceMatrix, lockedPrefixLength
           improved = true;
         }
       }
+    }
+  }
+
+  return bestRoute;
+};
+
+const optimizeClosedRouteWithOrOpt = (route, distanceMatrix, lockedPrefixLength = 0) => {
+  if (!Array.isArray(route) || route.length < 3) {
+    return route;
+  }
+
+  let bestRoute = [...route];
+  let bestDistance = calculateClosedRouteDistanceFromMatrix(bestRoute, distanceMatrix);
+  let improved = true;
+
+  while (improved) {
+    improved = false;
+
+    for (let fromIndex = lockedPrefixLength; fromIndex < bestRoute.length; fromIndex += 1) {
+      for (let toIndex = lockedPrefixLength; toIndex <= bestRoute.length - 1; toIndex += 1) {
+        if (toIndex === fromIndex) {
+          continue;
+        }
+
+        const candidateRoute = relocateRouteNode(bestRoute, fromIndex, toIndex);
+        const candidateDistance = calculateClosedRouteDistanceFromMatrix(candidateRoute, distanceMatrix);
+
+        if (candidateDistance + 0.001 < bestDistance) {
+          bestRoute = candidateRoute;
+          bestDistance = candidateDistance;
+          improved = true;
+        }
+      }
+    }
+  }
+
+  return bestRoute;
+};
+
+const optimizeClosedRouteWithTwoOptAndOrOpt = (route, distanceMatrix, lockedPrefixLength = 0) => {
+  if (!Array.isArray(route) || route.length < 3) {
+    return route;
+  }
+
+  let bestRoute = [...route];
+  let bestDistance = calculateClosedRouteDistanceFromMatrix(bestRoute, distanceMatrix);
+  let improved = true;
+
+  while (improved) {
+    improved = false;
+
+    const twoOptRoute = optimizeClosedRouteWithTwoOpt(bestRoute, distanceMatrix, lockedPrefixLength);
+    const twoOptDistance = calculateClosedRouteDistanceFromMatrix(twoOptRoute, distanceMatrix);
+
+    if (twoOptDistance + 0.001 < bestDistance) {
+      bestRoute = twoOptRoute;
+      bestDistance = twoOptDistance;
+      improved = true;
+    }
+
+    const orOptRoute = optimizeClosedRouteWithOrOpt(bestRoute, distanceMatrix, lockedPrefixLength);
+    const orOptDistance = calculateClosedRouteDistanceFromMatrix(orOptRoute, distanceMatrix);
+
+    if (orOptDistance + 0.001 < bestDistance) {
+      bestRoute = orOptRoute;
+      bestDistance = orOptDistance;
+      improved = true;
     }
   }
 
@@ -454,7 +528,7 @@ const buildRouteContext = async (clients, options = {}) => {
 const buildRouteOption = (routeMeta, route, distanceMatrix, lockedPrefixLength = 0) => {
   const optimizedRoute = routeMeta.type === "alphabetical"
     ? route
-    : optimizeClosedRouteWithTwoOpt(route, distanceMatrix, lockedPrefixLength);
+    : optimizeClosedRouteWithTwoOptAndOrOpt(route, distanceMatrix, lockedPrefixLength);
 
   return {
     ...routeMeta,
@@ -488,7 +562,7 @@ const buildRouteOptions = async (clients, options = {}) => {
   const lockedPrefixLength = startClient ? 1 : 0;
 
   const closestGreedy = buildGreedyRoute(indexedClients, distanceMatrix, false);
-  const closestOptimized = optimizeClosedRouteWithTwoOpt(closestGreedy, distanceMatrix, lockedPrefixLength);
+  const closestOptimized = optimizeClosedRouteWithTwoOptAndOrOpt(closestGreedy, distanceMatrix, lockedPrefixLength);
   const mirroredIndexed = buildMirroredIndexedRoute(closestOptimized, lockedPrefixLength);
 
   const optionBuilders = [
