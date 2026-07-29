@@ -117,6 +117,209 @@ const applyRouteArtifactsToAssignment = async (assignment, stops) => {
 };
 
 const MONTH_QUERY_PATTERN = /^\d{4}-\d{2}$/;
+const HIGH_NOVELTY_RATE_THRESHOLD = Number(process.env.HIGH_NOVELTY_RATE_THRESHOLD || 20);
+
+const sumDispatchIssueItemsQuantity = (items) => (Array.isArray(items)
+  ? items.reduce((total, item) => total + (Number(item?.quantity) || 0), 0)
+  : 0);
+
+const buildIssueSummaryByDriver = (issueReports) => {
+  const summary = new Map();
+
+  (Array.isArray(issueReports) ? issueReports : []).forEach((report) => {
+    const driverId = String(report?.driverId || "SIN_CHOFER").trim() || "SIN_CHOFER";
+    const driverName = String(report?.driverName || "").trim();
+    const clientId = String(report?.clientId || "").trim();
+    const itemCount = sumDispatchIssueItemsQuantity(report?.items);
+    const currentDriver = summary.get(driverId) || {
+      driverId,
+      driverName: driverName || driverId,
+      reportCount: 0,
+      itemCount: 0,
+      clientIds: new Set(),
+      clientReportCounts: new Map(),
+    };
+
+    currentDriver.reportCount += 1;
+    currentDriver.itemCount += itemCount;
+
+    if (clientId) {
+      currentDriver.clientIds.add(clientId);
+      currentDriver.clientReportCounts.set(clientId, (currentDriver.clientReportCounts.get(clientId) || 0) + 1);
+    }
+
+    if (!currentDriver.driverName && driverName) {
+      currentDriver.driverName = driverName;
+    }
+
+    summary.set(driverId, currentDriver);
+  });
+
+  return summary;
+};
+
+const buildDispatchIssueInsightsForStatuses = (routeStatuses, issueReports) => {
+  const routeSummaryById = new Map(
+    (Array.isArray(routeStatuses) ? routeStatuses : []).map((route) => [String(route?.routeId || ""), route]),
+  );
+  const routeIssueMap = new Map();
+  const clientIssueMap = new Map();
+  const driverIssueMap = new Map();
+
+  (Array.isArray(issueReports) ? issueReports : []).forEach((report) => {
+    const routeId = String(report?.routeId || "");
+    const driverId = String(report?.driverId || "SIN_CHOFER").trim() || "SIN_CHOFER";
+    const driverName = String(report?.driverName || "").trim();
+    const clientId = String(report?.clientId || "").trim();
+    const clientName = String(report?.clientName || "").trim();
+    const itemCount = sumDispatchIssueItemsQuantity(report?.items);
+
+    const currentRouteIssue = routeIssueMap.get(routeId) || {
+      issueReportCount: 0,
+      issueItemCount: 0,
+      clientsWithIssues: new Set(),
+      lastIssueAt: null,
+    };
+
+    currentRouteIssue.issueReportCount += 1;
+    currentRouteIssue.issueItemCount += itemCount;
+
+    if (clientId) {
+      currentRouteIssue.clientsWithIssues.add(clientId);
+    }
+
+    const reportDate = report?.createdAt || null;
+    if (!currentRouteIssue.lastIssueAt || new Date(reportDate) > new Date(currentRouteIssue.lastIssueAt)) {
+      currentRouteIssue.lastIssueAt = reportDate;
+    }
+
+    routeIssueMap.set(routeId, currentRouteIssue);
+
+    const currentClientIssue = clientIssueMap.get(clientId) || {
+      clientId,
+      clientName: clientName || clientId,
+      reportCount: 0,
+      itemCount: 0,
+      drivers: new Set(),
+      lastIssueAt: null,
+    };
+
+    currentClientIssue.reportCount += 1;
+    currentClientIssue.itemCount += itemCount;
+    currentClientIssue.drivers.add(driverId);
+
+    if (!currentClientIssue.lastIssueAt || new Date(reportDate) > new Date(currentClientIssue.lastIssueAt)) {
+      currentClientIssue.lastIssueAt = reportDate;
+    }
+
+    clientIssueMap.set(clientId, currentClientIssue);
+
+    const currentDriverIssue = driverIssueMap.get(driverId) || {
+      driverId,
+      driverName: driverName || driverId,
+      reportCount: 0,
+      itemCount: 0,
+      clients: new Set(),
+      routeIds: new Set(),
+      clientIssueCounts: new Map(),
+    };
+
+    currentDriverIssue.reportCount += 1;
+    currentDriverIssue.itemCount += itemCount;
+
+    if (clientId) {
+      currentDriverIssue.clients.add(clientId);
+      currentDriverIssue.clientIssueCounts.set(clientId, (currentDriverIssue.clientIssueCounts.get(clientId) || 0) + 1);
+    }
+
+    if (routeId) {
+      currentDriverIssue.routeIds.add(routeId);
+    }
+
+    if (!currentDriverIssue.driverName && driverName) {
+      currentDriverIssue.driverName = driverName;
+    }
+
+    driverIssueMap.set(driverId, currentDriverIssue);
+  });
+
+  const topClients = Array.from(clientIssueMap.values())
+    .map((client) => ({
+      clientId: client.clientId,
+      clientName: client.clientName,
+      reportCount: client.reportCount,
+      itemCount: client.itemCount,
+      affectedDriversCount: client.drivers.size,
+      lastIssueAt: client.lastIssueAt,
+    }))
+    .sort((leftClient, rightClient) => {
+      if (rightClient.reportCount !== leftClient.reportCount) {
+        return rightClient.reportCount - leftClient.reportCount;
+      }
+
+      return rightClient.itemCount - leftClient.itemCount;
+    })
+    .slice(0, 12);
+
+  const topDrivers = Array.from(driverIssueMap.values())
+    .map((driver) => {
+      const assignedClients = Array.from(driver.routeIds).reduce((total, routeId) => {
+        const routeSummary = routeSummaryById.get(routeId);
+        return total + (Number(routeSummary?.totalClients) || 0);
+      }, 0);
+      const repeatIssueClientsCount = Array.from(driver.clientIssueCounts.values())
+        .filter((count) => count >= 2)
+        .length;
+      const issueRatePer100Clients = assignedClients > 0
+        ? Number(((driver.reportCount / assignedClients) * 100).toFixed(1))
+        : 0;
+      const highNoveltyIndicator = issueRatePer100Clients >= HIGH_NOVELTY_RATE_THRESHOLD || repeatIssueClientsCount >= 2;
+
+      return {
+        driverId: driver.driverId,
+        driverName: driver.driverName,
+        reportCount: driver.reportCount,
+        itemCount: driver.itemCount,
+        clientsWithIssuesCount: driver.clients.size,
+        repeatIssueClientsCount,
+        assignedClients,
+        issueRatePer100Clients,
+        highNoveltyIndicator,
+      };
+    })
+    .sort((leftDriver, rightDriver) => {
+      if (rightDriver.issueRatePer100Clients !== leftDriver.issueRatePer100Clients) {
+        return rightDriver.issueRatePer100Clients - leftDriver.issueRatePer100Clients;
+      }
+
+      return rightDriver.reportCount - leftDriver.reportCount;
+    });
+
+  const overview = {
+    totalIssueReports: topDrivers.reduce((total, driver) => total + driver.reportCount, 0),
+    totalIssueItems: topDrivers.reduce((total, driver) => total + driver.itemCount, 0),
+    driversWithHighNoveltyIndicator: topDrivers.filter((driver) => driver.highNoveltyIndicator).length,
+    topClientsCount: topClients.length,
+    thresholdPer100Clients: HIGH_NOVELTY_RATE_THRESHOLD,
+  };
+
+  const routeIssueStats = new Map(Array.from(routeIssueMap.entries()).map(([routeId, issue]) => [
+    routeId,
+    {
+      issueReportCount: issue.issueReportCount,
+      issueItemCount: issue.issueItemCount,
+      clientsWithIssuesCount: issue.clientsWithIssues.size,
+      lastIssueAt: issue.lastIssueAt,
+    },
+  ]));
+
+  return {
+    routeIssueStats,
+    overview,
+    topClients,
+    topDrivers,
+  };
+};
 
 const createMonthDateRange = (monthQuery) => {
   const selectedDate = typeof monthQuery === "string" && MONTH_QUERY_PATTERN.test(monthQuery)
@@ -138,7 +341,7 @@ const buildAnalyticsMonthLabel = (date) => date.toLocaleDateString("es-MX", {
   year: "numeric",
 });
 
-const summarizeDriverAnalytics = (routes) => {
+const summarizeDriverAnalytics = (routes, issueSummaryByDriver = new Map()) => {
   const driversMap = new Map();
 
   routes.forEach((route) => {
@@ -195,26 +398,50 @@ const summarizeDriverAnalytics = (routes) => {
   });
 
   return [...driversMap.values()]
-    .map((driver) => ({
-      ...driver,
-      totalKg: Number(driver.totalKg.toFixed(2)),
-      totalDistanceKm: Number(driver.totalDistanceKm.toFixed(2)),
-      completionRate: driver.routeCount > 0
-        ? Math.round((driver.completedRoutes / driver.routeCount) * 100)
-        : 0,
-      dispatchRate: driver.assignedUnits > 0
-        ? Math.round((driver.completedUnits / driver.assignedUnits) * 100)
-        : 0,
-      avgKgPerRoute: driver.routeCount > 0
-        ? Number((driver.totalKg / driver.routeCount).toFixed(2))
-        : 0,
-      avgClientsPerRoute: driver.routeCount > 0
-        ? Number((driver.totalClients / driver.routeCount).toFixed(1))
-        : 0,
-      avgDistancePerRoute: driver.routeCount > 0
-        ? Number((driver.totalDistanceKm / driver.routeCount).toFixed(2))
-        : 0,
-    }))
+    .map((driver) => {
+      const issueSummary = issueSummaryByDriver.get(driver.driverId) || null;
+      const issueReportCount = issueSummary?.reportCount || 0;
+      const issueItemCount = issueSummary?.itemCount || 0;
+      const clientsWithIssuesCount = issueSummary?.clientIds?.size || 0;
+      const repeatIssueClientsCount = issueSummary
+        ? Array.from(issueSummary.clientReportCounts.values()).filter((count) => count >= 2).length
+        : 0;
+      const issueRatePer100Clients = driver.totalClients > 0
+        ? Number(((issueReportCount / driver.totalClients) * 100).toFixed(1))
+        : 0;
+      const repeatIssueClientRate = clientsWithIssuesCount > 0
+        ? Math.round((repeatIssueClientsCount / clientsWithIssuesCount) * 100)
+        : 0;
+      const highNoveltyIndicator = issueRatePer100Clients >= HIGH_NOVELTY_RATE_THRESHOLD || repeatIssueClientsCount >= 2;
+
+      return {
+        ...driver,
+        totalKg: Number(driver.totalKg.toFixed(2)),
+        totalDistanceKm: Number(driver.totalDistanceKm.toFixed(2)),
+        completionRate: driver.routeCount > 0
+          ? Math.round((driver.completedRoutes / driver.routeCount) * 100)
+          : 0,
+        dispatchRate: driver.assignedUnits > 0
+          ? Math.round((driver.completedUnits / driver.assignedUnits) * 100)
+          : 0,
+        avgKgPerRoute: driver.routeCount > 0
+          ? Number((driver.totalKg / driver.routeCount).toFixed(2))
+          : 0,
+        avgClientsPerRoute: driver.routeCount > 0
+          ? Number((driver.totalClients / driver.routeCount).toFixed(1))
+          : 0,
+        avgDistancePerRoute: driver.routeCount > 0
+          ? Number((driver.totalDistanceKm / driver.routeCount).toFixed(2))
+          : 0,
+        issueReportCount,
+        issueItemCount,
+        clientsWithIssuesCount,
+        repeatIssueClientsCount,
+        issueRatePer100Clients,
+        repeatIssueClientRate,
+        highNoveltyIndicator,
+      };
+    })
     .sort((currentDriver, nextDriver) => {
       if (nextDriver.completedRoutes !== currentDriver.completedRoutes) {
         return nextDriver.completedRoutes - currentDriver.completedRoutes;
@@ -237,6 +464,12 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
     pendingCount: accumulator.pendingCount + driver.pendingCount,
     assignedUnits: accumulator.assignedUnits + driver.assignedUnits,
     completedUnits: accumulator.completedUnits + driver.completedUnits,
+    totalIssueReports: accumulator.totalIssueReports + (driver.issueReportCount || 0),
+    totalIssueItems: accumulator.totalIssueItems + (driver.issueItemCount || 0),
+    issueRatePer100Clients: accumulator.issueRatePer100Clients + (driver.issueRatePer100Clients || 0),
+    repeatIssueClientsCount: accumulator.repeatIssueClientsCount + (driver.repeatIssueClientsCount || 0),
+    clientsWithIssuesCount: accumulator.clientsWithIssuesCount + (driver.clientsWithIssuesCount || 0),
+    highNoveltyDrivers: accumulator.highNoveltyDrivers + (driver.highNoveltyIndicator ? 1 : 0),
   }), {
     totalKg: 0,
     totalClients: 0,
@@ -245,6 +478,12 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
     pendingCount: 0,
     assignedUnits: 0,
     completedUnits: 0,
+    totalIssueReports: 0,
+    totalIssueItems: 0,
+    issueRatePer100Clients: 0,
+    repeatIssueClientsCount: 0,
+    clientsWithIssuesCount: 0,
+    highNoveltyDrivers: 0,
   });
 
   return {
@@ -267,6 +506,16 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
     avgClientsPerDriver: driverAnalytics.length > 0
       ? Number((totals.totalClients / driverAnalytics.length).toFixed(1))
       : 0,
+    totalIssueReports: totals.totalIssueReports,
+    totalIssueItems: totals.totalIssueItems,
+    highNoveltyDrivers: totals.highNoveltyDrivers,
+    avgIssueRatePer100Clients: driverAnalytics.length > 0
+      ? Number((totals.issueRatePer100Clients / driverAnalytics.length).toFixed(1))
+      : 0,
+    repeatIssueClientRate: totals.clientsWithIssuesCount > 0
+      ? Math.round((totals.repeatIssueClientsCount / totals.clientsWithIssuesCount) * 100)
+      : 0,
+    noveltyThreshold: HIGH_NOVELTY_RATE_THRESHOLD,
   };
 };
 
@@ -501,6 +750,42 @@ const getDriverCurrentRoute = async (req, res) => {
   }
 };
 
+const getDriverRouteById = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const selectedRoute = await RouteAssignment.findById(routeId).lean();
+
+    if (!selectedRoute) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const normalizedDriverId = String(selectedRoute.driverId || "").trim();
+    const activeRoutes = normalizedDriverId
+      ? await RouteAssignment.find({ driverId: normalizedDriverId, status: "active" })
+        .sort({ createdAt: -1 })
+        .lean()
+      : [];
+
+    const hasSelectedRoute = activeRoutes.some((route) => String(route?._id) === String(selectedRoute._id));
+    const routes = hasSelectedRoute
+      ? activeRoutes
+      : [selectedRoute, ...activeRoutes];
+
+    res.status(200).json({
+      route: selectedRoute,
+      routes,
+    });
+  } catch (err) {
+    console.log("Error obteniendo ruta por ID:", err);
+    res.status(500).json({ message: "Error getting route by ID" });
+  }
+};
+
 const listRouteAssignments = async (_req, res) => {
   try {
     const routes = await RouteAssignment.find()
@@ -521,15 +806,108 @@ const listRouteDispatchStatuses = async (_req, res) => {
       .lean();
 
     const routeStatuses = routes.map((route) => buildRouteDispatchStatusSummary(route));
-    const totals = buildRouteDispatchTotals(routeStatuses);
+    const routeIds = routes.map((route) => route._id);
+    const issueReports = routeIds.length > 0
+      ? await DispatchIssueReport.find({ routeId: { $in: routeIds } }).lean()
+      : [];
+    const issueInsights = buildDispatchIssueInsightsForStatuses(routeStatuses, issueReports);
+    const enrichedRouteStatuses = routeStatuses.map((route) => {
+      const novelty = issueInsights.routeIssueStats.get(String(route.routeId || ""));
+
+      return {
+        ...route,
+        issueReportCount: novelty?.issueReportCount || 0,
+        issueItemCount: novelty?.issueItemCount || 0,
+        clientsWithIssuesCount: novelty?.clientsWithIssuesCount || 0,
+        lastIssueAt: novelty?.lastIssueAt || null,
+      };
+    });
+    const totals = {
+      ...buildRouteDispatchTotals(enrichedRouteStatuses),
+      totalIssueReports: issueInsights.overview.totalIssueReports,
+      totalIssueItems: issueInsights.overview.totalIssueItems,
+      driversWithHighNoveltyIndicator: issueInsights.overview.driversWithHighNoveltyIndicator,
+    };
 
     res.status(200).json({
-      routes: routeStatuses,
+      routes: enrichedRouteStatuses,
       totals,
+      issueInsights: {
+        overview: issueInsights.overview,
+        topClients: issueInsights.topClients,
+        topDrivers: issueInsights.topDrivers,
+      },
     });
   } catch (err) {
     console.log("Error obteniendo estatus de despachos:", err);
     res.status(500).json({ message: "Error getting route dispatch statuses" });
+  }
+};
+
+const getRouteDispatchStatusDetail = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId).lean();
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const routeSummary = buildRouteDispatchStatusSummary(assignment);
+    const issueReports = await DispatchIssueReport.find({ routeId: assignment._id })
+      .sort({ createdAt: -1 })
+      .lean();
+    const issueInsights = buildDispatchIssueInsightsForStatuses([routeSummary], issueReports);
+    const routeIssueStats = issueInsights.routeIssueStats.get(String(assignment._id)) || {
+      issueReportCount: 0,
+      issueItemCount: 0,
+      clientsWithIssuesCount: 0,
+      lastIssueAt: null,
+    };
+
+    res.status(200).json({
+      route: {
+        ...routeSummary,
+        routeType: assignment.routeType || "closest",
+        routeTypeLabel: assignment.routeTypeLabel || "Mas cercana",
+        totalWeight: Number(assignment.totalWeight) || 0,
+        totalDistanceKm: Number(assignment.totalDistanceKm) || 0,
+        openRouteLink: assignment.openRouteLink || "",
+        googleMapsRouteLinks: Array.isArray(assignment.googleMapsRouteLinks) ? assignment.googleMapsRouteLinks : [],
+        wasDriverModified: Boolean(assignment.wasDriverModified),
+        driverModifiedAt: assignment.driverModifiedAt || null,
+        stops: (Array.isArray(assignment.stops) ? assignment.stops : [])
+          .map((stop) => ({
+            order: Number(stop?.order) || 0,
+            clientId: String(stop?.clientId || ""),
+            nombre: String(stop?.nombre || ""),
+            weight: Number(stop?.weight) || 0,
+            dispatched: Boolean(stop?.dispatched),
+            dispatchedAt: stop?.dispatchedAt || null,
+            googleMapsLink: String(stop?.googleMapsLink || ""),
+          }))
+          .sort((currentStop, nextStop) => currentStop.order - nextStop.order),
+        missingClients: (Array.isArray(assignment.missingClients) ? assignment.missingClients : []).map((client) => ({
+          clientId: String(client?.clientId || ""),
+          weight: Number(client?.weight) || 0,
+          resolved: Boolean(client?.resolved),
+          resolvedAt: client?.resolvedAt || null,
+        })),
+        issueReportCount: routeIssueStats.issueReportCount,
+        issueItemCount: routeIssueStats.issueItemCount,
+        clientsWithIssuesCount: routeIssueStats.clientsWithIssuesCount,
+        lastIssueAt: routeIssueStats.lastIssueAt,
+      },
+      reports: issueReports,
+    });
+  } catch (err) {
+    console.log("Error obteniendo detalle de estatus de ruta:", err);
+    res.status(500).json({ message: "Error getting route dispatch status detail" });
   }
 };
 
@@ -553,7 +931,14 @@ const getDriverPerformanceAnalytics = async (req, res) => {
       return routeDate && routeDate >= rangeStart && routeDate < rangeEnd;
     });
 
-    const drivers = summarizeDriverAnalytics(currentMonthRoutes);
+    const issueReports = await DispatchIssueReport.find({
+      createdAt: {
+        $gte: rangeStart,
+        $lt: rangeEnd,
+      },
+    }).lean();
+    const issueSummaryByDriver = buildIssueSummaryByDriver(issueReports);
+    const drivers = summarizeDriverAnalytics(currentMonthRoutes, issueSummaryByDriver);
     const overview = buildAnalyticsOverview(drivers, currentMonthRoutes.length);
     const monthlyHistory = buildMonthlyAnalyticsHistory(routes, rangeStart);
 
@@ -1011,8 +1396,10 @@ const getRouteDispatchIssueSummary = async (req, res) => {
 module.exports = {
   makeRoute,
   getDriverCurrentRoute,
+  getDriverRouteById,
   listRouteAssignments,
   listRouteDispatchStatuses,
+  getRouteDispatchStatusDetail,
   getDriverPerformanceAnalytics,
   updateRouteAssignment,
   deleteRouteAssignment,
