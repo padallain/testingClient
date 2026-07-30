@@ -1,6 +1,6 @@
 const express = require('express');
-const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, authMiddleware } = require('../controllers/auth.controllers');
-const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary } = require('../controllers/routing.controllers');
+const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, listUsersForAdmin, approveUserByAdmin, updateUserPasswordByAdmin, authMiddleware, requireAdminRole } = require('../controllers/auth.controllers');
+const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
@@ -43,6 +43,12 @@ router.post('/recover-password/reset', resetPasswordWithCode);
 
 router.use(authMiddleware);
 
+// Administración de usuarios
+router.get('/internal/admin/users', requireAdminRole, listUsersForAdmin);
+router.patch('/internal/admin/users/:userId/approval', requireAdminRole, approveUserByAdmin);
+router.patch('/internal/admin/users/:userId/password', requireAdminRole, updateUserPasswordByAdmin);
+router.post('/internal/admin/users', requireAdminRole, register);
+
 // Rutas de clientes
 router.post('/registerClient', registerClient);
 router.get('/countClients', countClients);
@@ -50,43 +56,44 @@ router.get('/getClient/:id', getClient);
 router.get('/getClient/:id/sedes', getClientBranches);
 router.post('/clientLocationReports', createClientLocationReport);
 router.get('/clientLocationReports', listClientLocationReports);
-router.get('/internal/admin/clientLocationReports', requireAdminDeleteKey, listClientLocationReports);
-router.delete('/internal/admin/clientLocationReports/:reportId', requireAdminDeleteKey, deleteClientLocationReport);
-router.delete('/internal/admin/deleteClient/:id', requireAdminDeleteKey, deleteClient);
+router.get('/internal/admin/clientLocationReports', requireAdminRole, requireAdminDeleteKey, listClientLocationReports);
+router.delete('/internal/admin/clientLocationReports/:reportId', requireAdminRole, requireAdminDeleteKey, deleteClientLocationReport);
+router.delete('/internal/admin/deleteClient/:id', requireAdminRole, requireAdminDeleteKey, deleteClient);
 
 // Rutas de logística
 router.post('/makeRoute', makeRoute);
 router.get('/driver-routes/:driverId/current', getDriverCurrentRoute);
 router.get('/driver-routes/by-id/:routeId', getDriverRouteById);
+router.get('/driver-routes/:routeId/export-gpx', exportRouteAsGpx);
 router.get('/driver-routes/:routeId/issues-summary', getRouteDispatchIssueSummary);
 router.patch('/driver-routes/:routeId/customize', customizeDriverRoute);
 router.post('/driver-routes/:routeId/reset', resetDriverRoute);
 router.get('/route-dispatch-status', listRouteDispatchStatuses);
 router.get('/route-dispatch-status/:routeId', getRouteDispatchStatusDetail);
 router.get('/driver-performance-analytics', getDriverPerformanceAnalytics);
-router.get('/internal/admin/routes', requireAdminDeleteKey, listRouteAssignments);
-router.patch('/internal/admin/routes/:routeId', requireAdminDeleteKey, updateRouteAssignment);
-router.delete('/internal/admin/routes/:routeId', requireAdminDeleteKey, deleteRouteAssignment);
+router.get('/internal/admin/routes', requireAdminRole, requireAdminDeleteKey, listRouteAssignments);
+router.patch('/internal/admin/routes/:routeId', requireAdminRole, requireAdminDeleteKey, updateRouteAssignment);
+router.delete('/internal/admin/routes/:routeId', requireAdminRole, requireAdminDeleteKey, deleteRouteAssignment);
 router.patch('/driver-routes/:routeId/stops/:clientId/dispatch', updateStopDispatchStatus);
 router.patch('/driver-routes/:routeId/missing/:clientId/resolve', updateMissingClientResolution);
 router.post('/driver-routes/:routeId/stops/:clientId/issues', createDispatchIssueReport);
-router.post('/internal/admin/driver-routes/:routeId/stops/:clientId/issues', requireAdminDeleteKey, createDispatchIssueReport);
-router.get('/internal/admin/dispatchIssueReports', requireAdminDeleteKey, listDispatchIssueReports);
-router.patch('/internal/admin/dispatchIssueReports/:reportId', requireAdminDeleteKey, updateDispatchIssueReport);
-router.delete('/internal/admin/dispatchIssueReports/:reportId', requireAdminDeleteKey, deleteDispatchIssueReport);
+router.post('/internal/admin/driver-routes/:routeId/stops/:clientId/issues', requireAdminRole, requireAdminDeleteKey, createDispatchIssueReport);
+router.get('/internal/admin/dispatchIssueReports', requireAdminRole, requireAdminDeleteKey, listDispatchIssueReports);
+router.patch('/internal/admin/dispatchIssueReports/:reportId', requireAdminRole, requireAdminDeleteKey, updateDispatchIssueReport);
+router.delete('/internal/admin/dispatchIssueReports/:reportId', requireAdminRole, requireAdminDeleteKey, deleteDispatchIssueReport);
 router.post('/dailyCheck', createDailyCheck);
 router.get('/dailyCheck', getRecentDailyChecks);
 router.get('/dailyCheck/placa/:placa', getDailyChecksByPlaca);
 router.get('/dailyCheck/:id', getDailyCheckById);
-router.patch('/internal/admin/dailyCheck/:id', requireAdminDeleteKey, updateDailyCheck);
-router.delete('/internal/admin/dailyCheck/:id', requireAdminDeleteKey, deleteDailyCheck);
-router.post('/vehicle-maintenance', requireAdminDeleteKey, createVehicleMaintenance);
+router.patch('/internal/admin/dailyCheck/:id', requireAdminRole, requireAdminDeleteKey, updateDailyCheck);
+router.delete('/internal/admin/dailyCheck/:id', requireAdminRole, requireAdminDeleteKey, deleteDailyCheck);
+router.post('/vehicle-maintenance', requireAdminRole, requireAdminDeleteKey, createVehicleMaintenance);
 router.get('/vehicle-maintenance', listRecentVehicleMaintenance);
 router.get('/vehicle-maintenance/upcoming', listUpcomingVehicleMaintenance);
 router.get('/vehicle-maintenance/placa/:placa', getVehicleMaintenanceByPlaca);
 router.get('/vehicle-maintenance/:id', getVehicleMaintenanceById);
-router.patch('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, updateVehicleMaintenance);
-router.delete('/internal/admin/vehicle-maintenance/:id', requireAdminDeleteKey, deleteVehicleMaintenance);
+router.patch('/internal/admin/vehicle-maintenance/:id', requireAdminRole, requireAdminDeleteKey, updateVehicleMaintenance);
+router.delete('/internal/admin/vehicle-maintenance/:id', requireAdminRole, requireAdminDeleteKey, deleteVehicleMaintenance);
 
 // Picking operativo
 router.get('/picking', (req, res) => {
@@ -94,12 +101,12 @@ router.get('/picking', (req, res) => {
 });
 router.post('/picking-reports', createPickingReport);
 router.get('/picking-reports/:id', getPickingReportById);
-router.get('/internal/admin/picking-reports', requireAdminDeleteKey, listRecentPickingReports);
-router.patch('/internal/admin/picking-reports/:id', requireAdminDeleteKey, updatePickingReport);
-router.delete('/internal/admin/picking-reports/:id', requireAdminDeleteKey, deletePickingReport);
-router.get('/internal/admin/picking-reports/order/:numeroPedido', requireAdminDeleteKey, getPickingReportByOrderNumber);
-router.post('/internal/admin/picking-reports/order/:numeroPedido/errors', requireAdminDeleteKey, createPickingErrorReport);
-router.get('/internal/admin/picking-reports/summary', requireAdminDeleteKey, getPickingSummary);
+router.get('/internal/admin/picking-reports', requireAdminRole, requireAdminDeleteKey, listRecentPickingReports);
+router.patch('/internal/admin/picking-reports/:id', requireAdminRole, requireAdminDeleteKey, updatePickingReport);
+router.delete('/internal/admin/picking-reports/:id', requireAdminRole, requireAdminDeleteKey, deletePickingReport);
+router.get('/internal/admin/picking-reports/order/:numeroPedido', requireAdminRole, requireAdminDeleteKey, getPickingReportByOrderNumber);
+router.post('/internal/admin/picking-reports/order/:numeroPedido/errors', requireAdminRole, requireAdminDeleteKey, createPickingErrorReport);
+router.get('/internal/admin/picking-reports/summary', requireAdminRole, requireAdminDeleteKey, getPickingSummary);
 
 // Despacho logístico
 router.get('/dispatch', getDispatchPage);

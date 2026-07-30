@@ -11,14 +11,31 @@ const SESSION_COOKIE_SAME_SITE = process.env.SESSION_COOKIE_SAME_SITE || (SESSIO
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || process.env.SESSION_SECRET || process.env.SECRET_KEY || "change_this_auth_token_secret";
 const USERNAME_COLLATION = { locale: "en", strength: 3 };
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const ADMIN_ROLE = "admin";
+const USER_ROLE = "user";
+const ALLOW_PUBLIC_SIGNUP = String(process.env.ALLOW_PUBLIC_SIGNUP || "false") === "true";
 
 const normalizeUsername = (value) => (typeof value === "string" ? value.trim() : "");
 const normalizeEmail = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+const normalizeRole = (value) => (String(value || "").trim().toLowerCase() === ADMIN_ROLE ? ADMIN_ROLE : USER_ROLE);
+
+const readAdminSeedEmails = () => new Set(
+  String(process.env.ADMIN_BOOTSTRAP_EMAILS || "")
+    .split(",")
+    .map((email) => normalizeEmail(email))
+    .filter(Boolean),
+);
+
+const isApprovedUser = (user) => user?.isApproved !== false;
+const isAdminUser = (user) => normalizeRole(user?.role) === ADMIN_ROLE;
 
 const buildSessionUser = (user) => ({
   id: user._id,
   username: user.username,
   email: user.email,
+  role: normalizeRole(user.role),
+  isApproved: isApprovedUser(user),
+  isAdmin: isAdminUser(user),
 });
 
 const generatePasswordResetCode = () => String(Math.floor(100000 + (Math.random() * 900000)));
@@ -90,6 +107,9 @@ const buildAuthToken = (user) => jwt.sign({
   sub: String(user.id),
   username: user.username,
   email: user.email,
+  role: normalizeRole(user.role),
+  isApproved: user.isApproved !== false,
+  isAdmin: normalizeRole(user.role) === ADMIN_ROLE,
 }, AUTH_TOKEN_SECRET, {
   expiresIn: Math.floor(SESSION_MAX_AGE_MS / 1000),
 });
@@ -122,10 +142,87 @@ const resolveAuthenticatedUser = (req) => {
       id: payload.sub,
       username: payload.username,
       email: payload.email,
+      role: normalizeRole(payload.role),
+      isApproved: payload.isApproved !== false,
+      isAdmin: Boolean(payload.isAdmin),
     };
   } catch (_error) {
     return null;
   }
+};
+
+const resolveRequesterAdminState = async (req) => {
+  const requester = resolveAuthenticatedUser(req);
+
+  if (!requester?.id) {
+    return {
+      isAdmin: false,
+      requesterUser: null,
+      requesterSession: null,
+    };
+  }
+
+  const requesterUser = await User.findById(requester.id);
+
+  if (!requesterUser || !isApprovedUser(requesterUser) || !isAdminUser(requesterUser)) {
+    return {
+      isAdmin: false,
+      requesterUser: null,
+      requesterSession: requester,
+    };
+  }
+
+  return {
+    isAdmin: true,
+    requesterUser,
+    requesterSession: buildSessionUser(requesterUser),
+  };
+};
+
+const buildApprovedByPayload = (sessionUser) => ({
+  id: String(sessionUser?.id || ""),
+  username: String(sessionUser?.username || ""),
+  email: String(sessionUser?.email || ""),
+});
+
+const ensurePasswordQuality = (password) => {
+  if (typeof password !== "string" || password.length < 6) {
+    return "La contrasena debe tener al menos 6 caracteres.";
+  }
+
+  return "";
+};
+
+const ensureSeedAdminPrivileges = async (user) => {
+  const adminSeedEmails = readAdminSeedEmails();
+
+  if (!adminSeedEmails.has(normalizeEmail(user?.email))) {
+    return user;
+  }
+
+  let hasChanges = false;
+
+  if (!isAdminUser(user)) {
+    user.role = ADMIN_ROLE;
+    hasChanges = true;
+  }
+
+  if (!isApprovedUser(user)) {
+    user.isApproved = true;
+    user.approvedAt = new Date();
+    user.approvedBy = {
+      id: "system-bootstrap",
+      username: "system",
+      email: "system@local",
+    };
+    hasChanges = true;
+  }
+
+  if (hasChanges) {
+    await user.save();
+  }
+
+  return user;
 };
 
 // REGISTRO DE USUARIO (AUTENTICACIÓN)
@@ -134,9 +231,24 @@ const register = async (req, res) => {
     const username = normalizeUsername(req.body?.username);
     const password = String(req.body?.password || "");
     const email = normalizeEmail(req.body?.email);
+    const requestedRole = normalizeRole(req.body?.role);
+
+    const passwordError = ensurePasswordQuality(password);
 
     if (!username || !password || !email) {
       return res.status(400).json({ message: 'Username, password and email are required' });
+    }
+
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
+    }
+
+    const requesterState = await resolveRequesterAdminState(req);
+
+    if (!ALLOW_PUBLIC_SIGNUP && !requesterState.isAdmin) {
+      return res.status(403).json({
+        message: "Solo un administrador puede crear usuarios nuevos.",
+      });
     }
 
     const existingUser = await User.findOne({ username }).collation(USERNAME_COLLATION);
@@ -150,16 +262,49 @@ const register = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const adminSeedEmails = readAdminSeedEmails();
+    const seededAsAdmin = adminSeedEmails.has(email);
+    const finalRole = requesterState.isAdmin && requestedRole === ADMIN_ROLE
+      ? ADMIN_ROLE
+      : seededAsAdmin
+        ? ADMIN_ROLE
+        : USER_ROLE;
+    const shouldAutoApprove = requesterState.isAdmin || seededAsAdmin;
+    const approvedBy = shouldAutoApprove
+      ? buildApprovedByPayload(requesterState.requesterSession || {
+        id: "system-bootstrap",
+        username: "system",
+        email: "system@local",
+      })
+      : {
+        id: "",
+        username: "",
+        email: "",
+      };
 
     const newUser = new User({
       username,
       password: hashedPassword,
       email,
+      role: finalRole,
+      isApproved: shouldAutoApprove,
+      approvedAt: shouldAutoApprove ? new Date() : null,
+      approvedBy,
     });
 
     await newUser.save();
 
-    res.status(201).json({ message: 'User registered successfully.' });
+    if (!newUser.isApproved) {
+      return res.status(201).json({
+        message: "Solicitud de usuario enviada. Debe ser aprobada por un administrador.",
+        pendingApproval: true,
+      });
+    }
+
+    res.status(201).json({
+      message: "Usuario creado correctamente.",
+      pendingApproval: false,
+    });
   } catch (err) {
     console.log("Error en el registro del usuario:", err);
     res.status(500).json({ message: resolveRegisterErrorMessage(err) });
@@ -185,10 +330,18 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    if (!isApprovedUser(user)) {
+      return res.status(403).json({
+        message: "Tu usuario aun no ha sido aprobado por un administrador.",
+      });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
+
+    await ensureSeedAdminPrivileges(user);
 
     req.session.regenerate((sessionError) => {
       if (sessionError) {
@@ -221,17 +374,33 @@ const login = async (req, res) => {
   }
 };
 
-const getSession = (req, res) => {
+const getSession = async (req, res) => {
   const authenticatedUser = resolveAuthenticatedUser(req);
 
   if (!authenticatedUser) {
     return res.status(401).json({ authenticated: false });
   }
 
-  return res.status(200).json({
-    authenticated: true,
-    user: authenticatedUser,
-  });
+  try {
+    const user = authenticatedUser.id
+      ? await User.findById(authenticatedUser.id)
+      : await User.findOne({ email: normalizeEmail(authenticatedUser.email) });
+
+    if (!user || !isApprovedUser(user)) {
+      return res.status(401).json({ authenticated: false });
+    }
+
+    const sessionUser = buildSessionUser(user);
+    req.session.user = sessionUser;
+
+    return res.status(200).json({
+      authenticated: true,
+      user: sessionUser,
+    });
+  } catch (error) {
+    console.log("Error resolving session:", error);
+    return res.status(500).json({ authenticated: false, message: "Error resolving session" });
+  }
 };
 
 const logout = (req, res) => {
@@ -345,8 +514,10 @@ const resetPasswordWithCode = async (req, res) => {
       return res.status(400).json({ message: "Correo, codigo y nueva contrasena son obligatorios." });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: "La nueva contrasena debe tener al menos 6 caracteres." });
+    const passwordError = ensurePasswordQuality(newPassword);
+
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const user = await User.findOne({ email });
@@ -374,16 +545,162 @@ const resetPasswordWithCode = async (req, res) => {
   }
 };
 
+const listUsersForAdmin = async (req, res) => {
+  try {
+    const requestedStatus = String(req.query?.status || "all").trim().toLowerCase();
+    const query = {};
+
+    if (requestedStatus === "pending") {
+      query.isApproved = false;
+    } else if (requestedStatus === "approved") {
+      query.isApproved = true;
+    }
+
+    const users = await User.find(query)
+      .sort({ createdAt: -1 })
+      .select("username email role isApproved approvedAt approvedBy createdAt updatedAt")
+      .lean();
+
+    res.status(200).json({ users });
+  } catch (err) {
+    console.log("Error listando usuarios para admin:", err);
+    res.status(500).json({ message: "No se pudieron listar los usuarios." });
+  }
+};
+
+const approveUserByAdmin = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const requestedApproval = req.body?.isApproved;
+    const requestedRole = normalizeRole(req.body?.role);
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    if (typeof requestedApproval !== "boolean") {
+      return res.status(400).json({ message: "isApproved must be boolean" });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.isApproved = requestedApproval;
+    user.role = requestedRole;
+    user.approvedAt = requestedApproval ? new Date() : null;
+    user.approvedBy = requestedApproval
+      ? buildApprovedByPayload(req.user)
+      : { id: "", username: "", email: "" };
+
+    await user.save();
+
+    res.status(200).json({
+      message: requestedApproval
+        ? "Usuario aprobado correctamente."
+        : "Usuario marcado como no aprobado.",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        isApproved: user.isApproved,
+        approvedAt: user.approvedAt,
+        approvedBy: user.approvedBy,
+      },
+    });
+  } catch (err) {
+    console.log("Error aprobando usuario:", err);
+    res.status(500).json({ message: "No se pudo actualizar la aprobacion del usuario." });
+  }
+};
+
+const updateUserPasswordByAdmin = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    const passwordError = ensurePasswordQuality(newPassword);
+
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.passwordResetCode = null;
+    user.passwordResetCodeExpiresAt = null;
+    await user.save();
+
+    res.status(200).json({ message: "Contrasena actualizada por administrador." });
+  } catch (err) {
+    console.log("Error cambiando contrasena por admin:", err);
+    res.status(500).json({ message: "No se pudo actualizar la contrasena del usuario." });
+  }
+};
+
 // MIDDLEWARE DE AUTORIZACIÓN
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   const authenticatedUser = resolveAuthenticatedUser(req);
 
   if (!authenticatedUser) {
     return res.status(401).json({ message: "Authentication required" });
   }
 
-  req.user = authenticatedUser;
-  next();
+  try {
+    const user = authenticatedUser.id
+      ? await User.findById(authenticatedUser.id)
+      : await User.findOne({ email: normalizeEmail(authenticatedUser.email) });
+
+    if (!user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    if (!isApprovedUser(user)) {
+      return res.status(403).json({ message: "Tu usuario no ha sido aprobado por un administrador." });
+    }
+
+    req.user = buildSessionUser(user);
+    next();
+  } catch (error) {
+    console.log("Error validating auth user:", error);
+    return res.status(500).json({ message: "Error validating user session" });
+  }
+};
+
+const requireAdminRole = async (req, res, next) => {
+  const authenticatedUser = resolveAuthenticatedUser(req);
+
+  if (!authenticatedUser) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+
+  try {
+    const user = authenticatedUser.id
+      ? await User.findById(authenticatedUser.id)
+      : await User.findOne({ email: normalizeEmail(authenticatedUser.email) });
+
+    if (!user || !isApprovedUser(user) || !isAdminUser(user)) {
+      return res.status(403).json({ message: "Solo administradores pueden ejecutar esta accion." });
+    }
+
+    req.user = buildSessionUser(user);
+    next();
+  } catch (error) {
+    console.log("Error validating admin role:", error);
+    return res.status(500).json({ message: "Error validating admin role" });
+  }
 };
 
 module.exports = {
@@ -394,5 +711,9 @@ module.exports = {
   requestPasswordResetCode,
   verifyPasswordResetCode,
   resetPasswordWithCode,
+  listUsersForAdmin,
+  approveUserByAdmin,
+  updateUserPasswordByAdmin,
   authMiddleware,
+  requireAdminRole,
 };

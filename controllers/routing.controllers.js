@@ -1393,6 +1393,68 @@ const getRouteDispatchIssueSummary = async (req, res) => {
   }
 };
 
+const escapeXml = (value) => String(value || "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/\"/g, "&quot;")
+  .replace(/'/g, "&apos;");
+
+const exportRouteAsGpx = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const route = await RouteAssignment.findById(routeId).lean();
+
+    if (!route) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const orderedStops = (Array.isArray(route.stops) ? route.stops : [])
+      .filter((stop) => Number.isFinite(Number(stop?.location?.latitude)) && Number.isFinite(Number(stop?.location?.longitude)))
+      .sort((leftStop, rightStop) => (Number(leftStop?.order) || 0) - (Number(rightStop?.order) || 0));
+
+    if (orderedStops.length === 0) {
+      return res.status(400).json({ message: "Route has no valid georeferenced stops" });
+    }
+
+    const routeName = route.routeLabel || `RUTA-${String(route._id)}`;
+    const routeDescription = `Ruta oficial backend de ${route.driverName || route.driverId || "chofer"}`;
+    const waypointPoints = orderedStops
+      .map((stop) => `\n  <wpt lat="${Number(stop.location.latitude).toFixed(6)}" lon="${Number(stop.location.longitude).toFixed(6)}"><name>${escapeXml(`${stop.order}. ${stop.nombre || stop.clientId}`)}</name></wpt>`)
+      .join("");
+    const routePoints = orderedStops
+      .map((stop) => `\n      <rtept lat="${Number(stop.location.latitude).toFixed(6)}" lon="${Number(stop.location.longitude).toFixed(6)}"><name>${escapeXml(`${stop.order}. ${stop.nombre || stop.clientId}`)}</name></rtept>`)
+      .join("");
+
+    const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="makeroute-backend" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>${escapeXml(routeName)}</name>
+    <desc>${escapeXml(routeDescription)}</desc>
+    <time>${new Date().toISOString()}</time>
+  </metadata>${waypointPoints}
+  <rte>
+    <name>${escapeXml(routeName)}</name>
+    <desc>${escapeXml(routeDescription)}</desc>${routePoints}
+  </rte>
+</gpx>`;
+
+    const fileName = `${String(routeName).replace(/[^a-zA-Z0-9-_]/g, "_") || "ruta"}.gpx`;
+
+    res.setHeader("Content-Type", "application/gpx+xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.status(200).send(gpxContent);
+  } catch (err) {
+    console.log("Error exportando ruta GPX:", err);
+    res.status(500).json({ message: "Error exporting route as GPX" });
+  }
+};
+
 module.exports = {
   makeRoute,
   getDriverCurrentRoute,
@@ -1412,4 +1474,5 @@ module.exports = {
   deleteDispatchIssueReport,
   listDispatchIssueReports,
   getRouteDispatchIssueSummary,
+  exportRouteAsGpx,
 };
