@@ -164,6 +164,10 @@ const resolveRequesterAdminState = async (req) => {
 
   const requesterUser = await User.findById(requester.id);
 
+  if (requesterUser) {
+    await ensureAdminRoleApproval(requesterUser);
+  }
+
   if (!requesterUser || !isApprovedUser(requesterUser) || !isAdminUser(requesterUser)) {
     return {
       isAdmin: false,
@@ -222,6 +226,23 @@ const ensureSeedAdminPrivileges = async (user) => {
     await user.save();
   }
 
+  return user;
+};
+
+const ensureAdminRoleApproval = async (user) => {
+  if (!user || !isAdminUser(user) || isApprovedUser(user)) {
+    return user;
+  }
+
+  user.isApproved = true;
+  user.approvedAt = new Date();
+  user.approvedBy = {
+    id: "system-admin-role",
+    username: "system",
+    email: "system@local",
+  };
+
+  await user.save();
   return user;
 };
 
@@ -330,18 +351,20 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    if (!isApprovedUser(user)) {
-      return res.status(403).json({
-        message: "Tu usuario aun no ha sido aprobado por un administrador.",
-      });
-    }
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    // Apply bootstrap admin/approval first so seeded admin users are not blocked.
     await ensureSeedAdminPrivileges(user);
+    await ensureAdminRoleApproval(user);
+
+    if (!isApprovedUser(user)) {
+      return res.status(403).json({
+        message: "Tu usuario aun no ha sido aprobado por un administrador.",
+      });
+    }
 
     req.session.regenerate((sessionError) => {
       if (sessionError) {
@@ -385,6 +408,10 @@ const getSession = async (req, res) => {
     const user = authenticatedUser.id
       ? await User.findById(authenticatedUser.id)
       : await User.findOne({ email: normalizeEmail(authenticatedUser.email) });
+
+    if (user) {
+      await ensureAdminRoleApproval(user);
+    }
 
     if (!user || !isApprovedUser(user)) {
       return res.status(401).json({ authenticated: false });
@@ -667,6 +694,8 @@ const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ message: "Authentication required" });
     }
 
+    await ensureAdminRoleApproval(user);
+
     if (!isApprovedUser(user)) {
       return res.status(403).json({ message: "Tu usuario no ha sido aprobado por un administrador." });
     }
@@ -690,6 +719,10 @@ const requireAdminRole = async (req, res, next) => {
     const user = authenticatedUser.id
       ? await User.findById(authenticatedUser.id)
       : await User.findOne({ email: normalizeEmail(authenticatedUser.email) });
+
+    if (user) {
+      await ensureAdminRoleApproval(user);
+    }
 
     if (!user || !isApprovedUser(user) || !isAdminUser(user)) {
       return res.status(403).json({ message: "Solo administradores pueden ejecutar esta accion." });
