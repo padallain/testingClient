@@ -36,7 +36,7 @@ const buildSessionUser = (user) => ({
   email: user.email,
   role: normalizeRole(user.role),
   approvalRequired: requiresApproval(user),
-  isApproved: !requiresApproval(user) || isApprovedUser(user),
+  isApproved: isApprovedUser(user),
   isAdmin: isAdminUser(user),
 });
 
@@ -111,7 +111,7 @@ const buildAuthToken = (user) => jwt.sign({
   email: user.email,
   role: normalizeRole(user.role),
   approvalRequired: requiresApproval(user),
-  isApproved: !requiresApproval(user) || user.isApproved !== false,
+  isApproved: user.isApproved !== false,
   isAdmin: normalizeRole(user.role) === ADMIN_ROLE,
 }, AUTH_TOKEN_SECRET, {
   expiresIn: Math.floor(SESSION_MAX_AGE_MS / 1000),
@@ -147,7 +147,7 @@ const resolveAuthenticatedUser = (req) => {
       email: payload.email,
       role: normalizeRole(payload.role),
       approvalRequired: Boolean(payload.approvalRequired),
-      isApproved: payload.approvalRequired ? payload.isApproved !== false : true,
+      isApproved: payload.isApproved !== false,
       isAdmin: Boolean(payload.isAdmin),
     };
   } catch (_error) {
@@ -365,12 +365,6 @@ const login = async (req, res) => {
     await ensureSeedAdminPrivileges(user);
     await ensureAdminRoleApproval(user);
 
-    if (requiresApproval(user) && !isApprovedUser(user)) {
-      return res.status(403).json({
-        message: "Tu usuario aun no ha sido aprobado por un administrador.",
-      });
-    }
-
     req.session.regenerate((sessionError) => {
       if (sessionError) {
         console.log("Error regenerating session:", sessionError);
@@ -418,7 +412,7 @@ const getSession = async (req, res) => {
       await ensureAdminRoleApproval(user);
     }
 
-    if (!user || (requiresApproval(user) && !isApprovedUser(user))) {
+    if (!user) {
       return res.status(401).json({ authenticated: false });
     }
 
@@ -583,13 +577,9 @@ const listUsersForAdmin = async (req, res) => {
     const query = {};
 
     if (requestedStatus === "pending") {
-      query.approvalRequired = true;
       query.isApproved = false;
     } else if (requestedStatus === "approved") {
-      query.$or = [
-        { approvalRequired: false },
-        { isApproved: true },
-      ];
+      query.isApproved = true;
     }
 
     const users = await User.find(query)
@@ -706,10 +696,6 @@ const authMiddleware = async (req, res, next) => {
 
     await ensureAdminRoleApproval(user);
 
-    if (requiresApproval(user) && !isApprovedUser(user)) {
-      return res.status(403).json({ message: "Tu usuario no ha sido aprobado por un administrador." });
-    }
-
     req.user = buildSessionUser(user);
     next();
   } catch (error) {
@@ -734,7 +720,7 @@ const requireAdminRole = async (req, res, next) => {
       await ensureAdminRoleApproval(user);
     }
 
-    if (!user || (requiresApproval(user) && !isApprovedUser(user)) || !isAdminUser(user)) {
+    if (!user || !isAdminUser(user)) {
       return res.status(403).json({ message: "Solo administradores pueden ejecutar esta accion." });
     }
 
