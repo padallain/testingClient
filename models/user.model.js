@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
     trim: true,
     index: true,
   },
+  approvalRequired: { type: Boolean, default: false, index: true },
   isApproved: { type: Boolean, default: false, index: true },
   approvedAt: { type: Date, default: null },
   approvedBy: {

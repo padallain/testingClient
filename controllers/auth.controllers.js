@@ -26,6 +26,7 @@ const readAdminSeedEmails = () => new Set(
     .filter(Boolean),
 );
 
+const requiresApproval = (user) => user?.approvalRequired === true;
 const isApprovedUser = (user) => user?.isApproved !== false;
 const isAdminUser = (user) => normalizeRole(user?.role) === ADMIN_ROLE;
 
@@ -34,7 +35,8 @@ const buildSessionUser = (user) => ({
   username: user.username,
   email: user.email,
   role: normalizeRole(user.role),
-  isApproved: isApprovedUser(user),
+  approvalRequired: requiresApproval(user),
+  isApproved: !requiresApproval(user) || isApprovedUser(user),
   isAdmin: isAdminUser(user),
 });
 
@@ -108,7 +110,8 @@ const buildAuthToken = (user) => jwt.sign({
   username: user.username,
   email: user.email,
   role: normalizeRole(user.role),
-  isApproved: user.isApproved !== false,
+  approvalRequired: requiresApproval(user),
+  isApproved: !requiresApproval(user) || user.isApproved !== false,
   isAdmin: normalizeRole(user.role) === ADMIN_ROLE,
 }, AUTH_TOKEN_SECRET, {
   expiresIn: Math.floor(SESSION_MAX_AGE_MS / 1000),
@@ -143,7 +146,8 @@ const resolveAuthenticatedUser = (req) => {
       username: payload.username,
       email: payload.email,
       role: normalizeRole(payload.role),
-      isApproved: payload.isApproved !== false,
+      approvalRequired: Boolean(payload.approvalRequired),
+      isApproved: payload.approvalRequired ? payload.isApproved !== false : true,
       isAdmin: Boolean(payload.isAdmin),
     };
   } catch (_error) {
@@ -308,6 +312,7 @@ const register = async (req, res) => {
       password: hashedPassword,
       email,
       role: finalRole,
+      approvalRequired: !shouldAutoApprove,
       isApproved: shouldAutoApprove,
       approvedAt: shouldAutoApprove ? new Date() : null,
       approvedBy,
@@ -360,7 +365,7 @@ const login = async (req, res) => {
     await ensureSeedAdminPrivileges(user);
     await ensureAdminRoleApproval(user);
 
-    if (!isApprovedUser(user)) {
+    if (requiresApproval(user) && !isApprovedUser(user)) {
       return res.status(403).json({
         message: "Tu usuario aun no ha sido aprobado por un administrador.",
       });
@@ -413,7 +418,7 @@ const getSession = async (req, res) => {
       await ensureAdminRoleApproval(user);
     }
 
-    if (!user || !isApprovedUser(user)) {
+    if (!user || (requiresApproval(user) && !isApprovedUser(user))) {
       return res.status(401).json({ authenticated: false });
     }
 
@@ -578,9 +583,13 @@ const listUsersForAdmin = async (req, res) => {
     const query = {};
 
     if (requestedStatus === "pending") {
+      query.approvalRequired = true;
       query.isApproved = false;
     } else if (requestedStatus === "approved") {
-      query.isApproved = true;
+      query.$or = [
+        { approvalRequired: false },
+        { isApproved: true },
+      ];
     }
 
     const users = await User.find(query)
@@ -616,6 +625,7 @@ const approveUserByAdmin = async (req, res) => {
     }
 
     user.isApproved = requestedApproval;
+    user.approvalRequired = !requestedApproval;
     user.role = requestedRole;
     user.approvedAt = requestedApproval ? new Date() : null;
     user.approvedBy = requestedApproval
@@ -696,7 +706,7 @@ const authMiddleware = async (req, res, next) => {
 
     await ensureAdminRoleApproval(user);
 
-    if (!isApprovedUser(user)) {
+    if (requiresApproval(user) && !isApprovedUser(user)) {
       return res.status(403).json({ message: "Tu usuario no ha sido aprobado por un administrador." });
     }
 
@@ -724,7 +734,7 @@ const requireAdminRole = async (req, res, next) => {
       await ensureAdminRoleApproval(user);
     }
 
-    if (!user || !isApprovedUser(user) || !isAdminUser(user)) {
+    if (!user || (requiresApproval(user) && !isApprovedUser(user)) || !isAdminUser(user)) {
       return res.status(403).json({ message: "Solo administradores pueden ejecutar esta accion." });
     }
 
