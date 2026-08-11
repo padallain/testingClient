@@ -104,7 +104,6 @@ const listUpcomingVehicleMaintenance = async (req, res) => {
 
     const records = await VehicleMaintenance.find({
       fechaProximoServicio: { $ne: null },
-      estado: { $ne: "completado" },
     })
       .sort({ fechaProximoServicio: 1, placa: 1, createdAt: -1 })
       .limit(limit)
@@ -124,9 +123,23 @@ const listUpcomingVehicleMaintenance = async (req, res) => {
       };
     });
 
+    const sortedUpcomingMaintenance = upcomingMaintenance.sort((leftRecord, rightRecord) => {
+      const leftDays = Number.isFinite(leftRecord.daysUntilService) ? leftRecord.daysUntilService : Number.POSITIVE_INFINITY;
+      const rightDays = Number.isFinite(rightRecord.daysUntilService) ? rightRecord.daysUntilService : Number.POSITIVE_INFINITY;
+
+      if (leftDays !== rightDays) {
+        return leftDays - rightDays;
+      }
+
+      const leftDate = new Date(leftRecord.fechaProximoServicio).getTime();
+      const rightDate = new Date(rightRecord.fechaProximoServicio).getTime();
+
+      return leftDate - rightDate;
+    });
+
     return res.status(200).json({
-      total: upcomingMaintenance.length,
-      mantenimientos: upcomingMaintenance,
+      total: sortedUpcomingMaintenance.length,
+      mantenimientos: sortedUpcomingMaintenance,
     });
   } catch (error) {
     console.log("Error obteniendo proximos mantenimientos:", error);
