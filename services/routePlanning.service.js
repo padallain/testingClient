@@ -18,7 +18,7 @@ const OJEDA_BOUNDS = {
   minLongitude: -71.40,
   maxLongitude: -71.15,
 };
-const OJEDA_ROUTE_ORIGIN = { latitude: 10.239623, longitude: -71.221185 };
+const OJEDA_ROUTE_ORIGIN = { latitude: 10.237621, longitude: -71.224077 };
 
 const ROUTE_TYPE_META = {
   closest: {
