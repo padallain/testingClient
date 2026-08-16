@@ -200,7 +200,25 @@ const routeUsesOjedaOrigin = (route) => Array.isArray(route)
   && route.length > 0
   && route.every((client) => isLocationWithinBounds(client?.location, OJEDA_BOUNDS));
 
+const getFirstRouteStop = (route) => {
+  if (!Array.isArray(route) || route.length === 0) {
+    return null;
+  }
+
+  return route.find((client) => hasValidLocation(client?.location)) || null;
+};
+
 const resolveRouteOrigin = (route) => {
+  const firstStop = getFirstRouteStop(route);
+
+  if (firstStop && isLocationWithinBounds(firstStop.location, OJEDA_BOUNDS)) {
+    return OJEDA_ROUTE_ORIGIN;
+  }
+
+  if (firstStop && isLocationWithinBounds(firstStop.location, CABIMAS_BOUNDS)) {
+    return CABIMAS_ROUTE_ORIGIN;
+  }
+
   if (routeUsesOjedaOrigin(route)) {
     return OJEDA_ROUTE_ORIGIN;
   }
