@@ -12,6 +12,13 @@ const CABIMAS_BOUNDS = {
   maxLongitude: -71.34,
 };
 const CABIMAS_ROUTE_ORIGIN = { latitude: 10.435931, longitude: -71.399238 };
+const OJEDA_BOUNDS = {
+  minLatitude: 10.16,
+  maxLatitude: 10.30,
+  minLongitude: -71.40,
+  maxLongitude: -71.15,
+};
+const OJEDA_ROUTE_ORIGIN = { latitude: 10.239623, longitude: -71.221185 };
 
 const ROUTE_TYPE_META = {
   closest: {
@@ -189,7 +196,17 @@ const buildRoundTripCoordinates = (route, origin = ORIGIN) => {
 const routeUsesCabimasOrigin = (route) => Array.isArray(route)
   && route.some((client) => isLocationWithinBounds(client?.location, CABIMAS_BOUNDS));
 
-const resolveRouteOrigin = (route) => (routeUsesCabimasOrigin(route) ? CABIMAS_ROUTE_ORIGIN : ORIGIN);
+const routeUsesOjedaOrigin = (route) => Array.isArray(route)
+  && route.length > 0
+  && route.every((client) => isLocationWithinBounds(client?.location, OJEDA_BOUNDS));
+
+const resolveRouteOrigin = (route) => {
+  if (routeUsesOjedaOrigin(route)) {
+    return OJEDA_ROUTE_ORIGIN;
+  }
+
+  return routeUsesCabimasOrigin(route) ? CABIMAS_ROUTE_ORIGIN : ORIGIN;
+};
 
 const buildIndexedClients = (clients, anchorId) => {
   const clientsWithCoordinates = getClientsWithCoordinates(clients);

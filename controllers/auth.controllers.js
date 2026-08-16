@@ -19,12 +19,18 @@ const normalizeUsername = (value) => (typeof value === "string" ? value.trim() :
 const normalizeEmail = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 const normalizeRole = (value) => (String(value || "").trim().toLowerCase() === ADMIN_ROLE ? ADMIN_ROLE : USER_ROLE);
 
-const readAdminSeedEmails = () => new Set(
-  String(process.env.ADMIN_BOOTSTRAP_EMAILS || "")
+const FIXED_ADMIN_EMAILS = new Set([
+  "egjrch@gmail.com",
+  "padallain2000@gmail.com",
+]);
+
+const readAdminSeedEmails = () => new Set([
+  ...FIXED_ADMIN_EMAILS,
+  ...String(process.env.ADMIN_BOOTSTRAP_EMAILS || "")
     .split(",")
     .map((email) => normalizeEmail(email))
     .filter(Boolean),
-);
+]);
 
 const requiresApproval = (user) => user?.approvalRequired === true;
 const isApprovedUser = (user) => user?.isApproved !== false;

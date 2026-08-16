@@ -1,3 +1,5 @@
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+
 const express = require("express");
 const session = require("express-session");
 const morgan = require("morgan");
