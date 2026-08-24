@@ -1,6 +1,6 @@
 const express = require('express');
 const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, listUsersForAdmin, approveUserByAdmin, updateUserPasswordByAdmin, authMiddleware, requireAdminRole } = require('../controllers/auth.controllers');
-const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
+const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
@@ -66,6 +66,7 @@ router.get('/driver-routes/:driverId/current', getDriverCurrentRoute);
 router.get('/driver-routes/by-id/:routeId', getDriverRouteById);
 router.get('/driver-routes/:routeId/export-gpx', exportRouteAsGpx);
 router.get('/driver-routes/:routeId/issues-summary', getRouteDispatchIssueSummary);
+router.post('/driver-routes/:routeId/customize/preview', previewDriverRouteCustomization);
 router.patch('/driver-routes/:routeId/customize', customizeDriverRoute);
 router.post('/driver-routes/:routeId/reset', resetDriverRoute);
 router.get('/route-dispatch-status', listRouteDispatchStatuses);

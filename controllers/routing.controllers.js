@@ -1131,6 +1131,63 @@ const customizeDriverRoute = async (req, res) => {
   }
 };
 
+const previewDriverRouteCustomization = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+    const submittedStops = Array.isArray(req.body?.stops) ? req.body.stops : [];
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    if (submittedStops.length === 0) {
+      return res.status(400).json({ message: "At least one stop is required to preview the route" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const currentStopsById = new Map(
+      assignment.stops.map((stop) => [String(stop.clientId), stop.toObject ? stop.toObject() : stop]),
+    );
+    const nextStops = [];
+
+    for (const rawStop of submittedStops) {
+      const clientId = String(rawStop?.clientId || "").trim();
+
+      if (!clientId || !currentStopsById.has(clientId)) {
+        return res.status(400).json({ message: `Stop ${clientId || "unknown"} is not part of the assigned route` });
+      }
+
+      nextStops.push(currentStopsById.get(clientId));
+      currentStopsById.delete(clientId);
+    }
+
+    if (currentStopsById.size > 0) {
+      return res.status(400).json({ message: "The customized route must include all assigned stops" });
+    }
+
+    const normalizedStops = mapStopsForArtifacts(nextStops);
+    const { googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(normalizedStops);
+    const totalDistanceKm = await calculateRouteDistance(normalizedStops);
+
+    return res.status(200).json({
+      message: "Route preview calculated successfully",
+      preview: {
+        totalDistanceKm,
+        googleMapsRouteLinks,
+        openRouteLink,
+      },
+    });
+  } catch (err) {
+    console.log("Error previsualizando ruta del chofer:", err);
+    return res.status(500).json({ message: "Error previewing driver route customization" });
+  }
+};
+
 const resetDriverRoute = async (req, res) => {
   try {
     const { routeId } = req.params;
@@ -1466,6 +1523,7 @@ module.exports = {
   updateRouteAssignment,
   deleteRouteAssignment,
   updateStopDispatchStatus,
+  previewDriverRouteCustomization,
   customizeDriverRoute,
   resetDriverRoute,
   updateMissingClientResolution,
