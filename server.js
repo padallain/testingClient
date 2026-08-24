@@ -2,6 +2,7 @@ require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
 const express = require("express");
 const session = require("express-session");
+const MongoStore = require("connect-mongo");
 const morgan = require("morgan");
 const cors = require("cors");
 const { connectToDatabase } = require("./db"); // Importa la función de conexión
@@ -22,6 +23,7 @@ const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE
   : isProduction;
 const sessionCookieSameSite = process.env.SESSION_COOKIE_SAME_SITE
   || (sessionCookieSecure ? "none" : "lax");
+const mongoUri = process.env.MONGODB_URI || process.env.DB_URI;
 
 const app = express();
 const allowedOrigins = [...new Set([
@@ -94,24 +96,44 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(session({
-    name: sessionCookieName,
-    secret: process.env.SESSION_SECRET || "change_this_session_secret",
-    proxy: sessionCookieSecure,
-    resave: false,
-    saveUninitialized: false,
-    rolling: false,
-    unset: "destroy",
-    cookie: {
-      path: "/",
-      secure: sessionCookieSecure,
-      httpOnly: true,
-      sameSite: sessionCookieSameSite,
-      maxAge: SESSION_MAX_AGE_MS,
-    },
-}));
+const sessionOptions = {
+  name: sessionCookieName,
+  secret: process.env.SESSION_SECRET || "change_this_session_secret",
+  proxy: sessionCookieSecure,
+  resave: false,
+  saveUninitialized: false,
+  rolling: false,
+  unset: "destroy",
+  cookie: {
+    path: "/",
+    secure: sessionCookieSecure,
+    httpOnly: true,
+    sameSite: sessionCookieSameSite,
+    maxAge: SESSION_MAX_AGE_MS,
+  },
+};
+
+if (mongoUri) {
+  sessionOptions.store = MongoStore.create({
+    mongoUrl: mongoUri,
+    collectionName: "sessions",
+    ttl: Math.floor(SESSION_MAX_AGE_MS / 1000),
+  });
+} else if (isProduction) {
+  console.warn("[config] MONGODB_URI/DB_URI no definido para session store. Se usara MemoryStore (no recomendado en produccion).");
+}
+
+app.use(session(sessionOptions));
 
 app.use(express.json());
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    ok: true,
+    status: "up",
+    uptimeSeconds: Math.floor(process.uptime()),
+    now: new Date().toISOString(),
+  });
+});
 app.use("/", startRoutes);
 
 const PORT = process.env.PORT || 3000;
