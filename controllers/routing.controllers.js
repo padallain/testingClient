@@ -574,7 +574,7 @@ const buildMonthlyAnalyticsHistory = (routes, selectedMonthStart) => {
 
 const makeRoute = async (req, res) => {
   try {
-    const { ids, stops, driverId, driverName, routeLabel, routeType } = req.body;
+    const { ids, stops, driverId, driverName, routeLabel, routeType, routeComment } = req.body;
     const routeWeight = normalizeWeight(req.body?.routeWeight);
     const anchorClientId = typeof req.body?.anchorClientId === "string" ? req.body.anchorClientId.trim() : null;
     const { normalizedStops, uniqueStops, duplicateClientIds } = normalizeRequestedStops({ ids, stops });
@@ -658,6 +658,7 @@ const makeRoute = async (req, res) => {
         driverId: normalizedDriverId,
         driverName: typeof driverName === "string" ? driverName.trim() : "",
         routeLabel: buildRouteLabel({ driverId: normalizedDriverId, requestedLabel: routeLabel }),
+        routeComment: typeof routeComment === "string" ? routeComment.trim() : "",
         routeType: selectedRouteOption.type,
         routeTypeLabel: selectedRouteOption.label,
         uniqueClientCount,
@@ -690,6 +691,7 @@ const makeRoute = async (req, res) => {
         driverId: assignment.driverId,
         driverName: assignment.driverName,
         routeLabel: assignment.routeLabel,
+        routeComment: assignment.routeComment,
         routeType: selectedRouteOption.type,
         routeTypeLabel: selectedRouteOption.label,
         totalDistanceKm: assignment.totalDistanceKm,

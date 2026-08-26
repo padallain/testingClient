@@ -7,6 +7,7 @@ const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehi
 const { getDispatchPage, getDispatchConfig, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
 const { createPickingReport, listRecentPickingReports, getPickingSummary, getPickingReportById, getPickingReportByOrderNumber, createPickingErrorReport, updatePickingReport, deletePickingReport } = require('../controllers/picking.controllers');
+const { sendTestEmailByAdmin, sendReminderEmailByAdmin } = require('../controllers/notifications.controllers');
 const despachoRoutes = require('./despacho.routes');
 const router = express.Router();
 
@@ -48,6 +49,8 @@ router.get('/internal/admin/users', requireAdminRole, listUsersForAdmin);
 router.patch('/internal/admin/users/:userId/approval', requireAdminRole, approveUserByAdmin);
 router.patch('/internal/admin/users/:userId/password', requireAdminRole, updateUserPasswordByAdmin);
 router.post('/internal/admin/users', requireAdminRole, register);
+router.post('/internal/admin/notifications/email-test', requireAdminRole, sendTestEmailByAdmin);
+router.post('/internal/admin/notifications/reminder-email', requireAdminRole, sendReminderEmailByAdmin);
 
 // Rutas de clientes
 router.post('/registerClient', registerClient);

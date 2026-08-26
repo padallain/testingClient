@@ -32,6 +32,7 @@ const routeAssignmentSchema = new mongoose.Schema(
     driverId: { type: String, required: true, trim: true, index: true },
     driverName: { type: String, default: '', trim: true },
     routeLabel: { type: String, required: true, trim: true },
+    routeComment: { type: String, default: '', trim: true },
     routeType: { type: String, default: 'closest', trim: true },
     routeTypeLabel: { type: String, default: 'Mas cercana', trim: true },
     uniqueClientCount: { type: Number, required: true, min: 0 },
