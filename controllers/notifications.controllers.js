@@ -1,5 +1,6 @@
 const User = require("../models/user.model");
 const { sendEmail } = require("../services/sendEmail");
+const { sendWhatsAppNotification, normalizePhoneNumber } = require("../services/sendWhatsApp");
 
 const ADMIN_ROLE = "admin";
 const USER_ROLE = "user";
@@ -21,6 +22,14 @@ function parseRecipientEmails(rawEmails) {
   return [...new Set(rawEmails.map((email) => normalizeEmail(email)).filter(Boolean))];
 }
 
+function parseRecipientPhones(rawPhones) {
+  if (!Array.isArray(rawPhones)) {
+    return [];
+  }
+
+  return [...new Set(rawPhones.map((phone) => normalizePhoneNumber(phone)).filter(Boolean))];
+}
+
 function resolveEmailErrorMessage(error) {
   const message = String(error?.message || "");
 
@@ -37,6 +46,24 @@ function resolveEmailErrorMessage(error) {
   }
 
   return "No se pudo enviar el correo.";
+}
+
+function resolveWhatsAppErrorMessage(error) {
+  const message = String(error?.message || "");
+
+  if (message.startsWith("WHATSAPP_CONFIG_INVALID:")) {
+    return "Configuracion de WhatsApp incompleta o invalida. Revisa WHATSAPP_ACCESS_TOKEN y WHATSAPP_PHONE_NUMBER_ID.";
+  }
+
+  if (message.startsWith("WHATSAPP_TIMEOUT:")) {
+    return "El proveedor de WhatsApp no respondio a tiempo. Intenta nuevamente.";
+  }
+
+  if (message.startsWith("WHATSAPP_SEND_FAILED:")) {
+    return "No se pudo enviar la notificacion de WhatsApp. Revisa el token, el numero y la plantilla.";
+  }
+
+  return "No se pudo enviar la notificacion de WhatsApp.";
 }
 
 function buildReminderMessage({ title, body }) {
@@ -164,7 +191,124 @@ const sendReminderEmailByAdmin = async (req, res) => {
   }
 };
 
+const sendTestWhatsAppByAdmin = async (req, res) => {
+  try {
+    const to = normalizePhoneNumber(req.body?.to);
+    const message = String(req.body?.message || "Este es un mensaje de prueba de MakeRoute por WhatsApp.").trim()
+      || "Este es un mensaje de prueba de MakeRoute por WhatsApp.";
+    const templateName = String(req.body?.templateName || "").trim();
+    const templateLanguageCode = String(req.body?.templateLanguageCode || "es").trim() || "es";
+    const templateParams = Array.isArray(req.body?.templateParams) ? req.body.templateParams : [];
+
+    if (!to) {
+      return res.status(400).json({ message: "El campo 'to' es obligatorio y debe ser un numero valido en formato internacional." });
+    }
+
+    await sendWhatsAppNotification({
+      to,
+      text: message,
+      templateName,
+      templateLanguageCode,
+      templateParams,
+    });
+
+    return res.status(200).json({
+      message: "Notificacion de WhatsApp enviada correctamente.",
+      to,
+    });
+  } catch (error) {
+    console.log("Error sending test WhatsApp message:", error);
+    return res.status(500).json({ message: resolveWhatsAppErrorMessage(error) });
+  }
+};
+
+const sendReminderWhatsAppByAdmin = async (req, res) => {
+  try {
+    const title = String(req.body?.title || "Recordatorio MakeRoute").trim() || "Recordatorio MakeRoute";
+    const body = String(req.body?.body || "").trim();
+    const recipientPhones = parseRecipientPhones(req.body?.recipientPhones);
+    const requestedRoles = Array.isArray(req.body?.roles)
+      ? req.body.roles.map((role) => normalizeRole(role))
+      : [USER_ROLE];
+    const roles = [...new Set(requestedRoles)];
+    const onlyApproved = req.body?.onlyApproved !== false;
+    const templateName = String(req.body?.templateName || "").trim();
+    const templateLanguageCode = String(req.body?.templateLanguageCode || "es").trim() || "es";
+    const templateParams = Array.isArray(req.body?.templateParams) ? req.body.templateParams : [];
+
+    if (!body && !templateName) {
+      return res.status(400).json({ message: "Debes indicar 'body' o una plantilla con 'templateName'." });
+    }
+
+    const usersFromRoles = await User.find({ role: { $in: roles } })
+      .select("phone whatsappNumber isApproved")
+      .lean();
+
+    const rolePhones = usersFromRoles
+      .filter((user) => !onlyApproved || user?.isApproved !== false)
+      .flatMap((user) => [user?.whatsappNumber, user?.phone])
+      .map((phone) => normalizePhoneNumber(phone))
+      .filter(Boolean);
+
+    const finalRecipients = [...new Set([...recipientPhones, ...rolePhones])];
+
+    if (finalRecipients.length === 0) {
+      return res.status(400).json({ message: "No hay numeros validos para enviar el recordatorio." });
+    }
+
+    const text = [
+      title,
+      "",
+      body,
+      "",
+      "Mensaje enviado automaticamente por MakeRoute.",
+    ].join("\n").trim();
+
+    const sendResults = [];
+
+    for (const to of finalRecipients) {
+      try {
+        await sendWhatsAppNotification({
+          to,
+          text,
+          templateName,
+          templateLanguageCode,
+          templateParams,
+        });
+
+        sendResults.push({ to, status: "sent" });
+      } catch (error) {
+        sendResults.push({
+          to,
+          status: "failed",
+          error: resolveWhatsAppErrorMessage(error),
+        });
+      }
+    }
+
+    const sentCount = sendResults.filter((item) => item.status === "sent").length;
+    const failedCount = sendResults.length - sentCount;
+
+    return res.status(200).json({
+      message: failedCount === 0
+        ? "Recordatorio por WhatsApp enviado correctamente."
+        : "Recordatorio por WhatsApp enviado con errores parciales.",
+      summary: {
+        totalRecipients: finalRecipients.length,
+        sentCount,
+        failedCount,
+      },
+      results: sendResults,
+    });
+  } catch (error) {
+    console.log("Error sending WhatsApp reminders:", error);
+    return res.status(500).json({ message: "No se pudo enviar el recordatorio por WhatsApp." });
+  }
+};
+
 module.exports = {
   sendTestEmailByAdmin,
   sendReminderEmailByAdmin,
+  sendTestWhatsAppByAdmin,
+  sendReminderWhatsAppByAdmin,
 };

@@ -7,15 +7,19 @@ function buildConfigError(message) {
   return new Error(`EMAIL_CONFIG_INVALID: ${message}`);
 }
 
+function normalizeEnvString(value) {
+  return String(value ?? "").trim();
+}
+
 function buildTransportConfig() {
-  const host = process.env.EMAIL_HOST;
-  const port = Number(process.env.EMAIL_PORT || 587);
-  const user = process.env.EMAIL_USER;
-  const pass = process.env.EMAIL_PASS;
-  const service = process.env.EMAIL_SERVICE;
-  const connectionTimeout = Number(process.env.EMAIL_CONNECTION_TIMEOUT_MS || 10000);
-  const greetingTimeout = Number(process.env.EMAIL_GREETING_TIMEOUT_MS || 10000);
-  const socketTimeout = Number(process.env.EMAIL_SOCKET_TIMEOUT_MS || 15000);
+  const host = normalizeEnvString(process.env.EMAIL_HOST);
+  const port = Number(normalizeEnvString(process.env.EMAIL_PORT || "587"));
+  const user = normalizeEnvString(process.env.EMAIL_USER);
+  const pass = normalizeEnvString(process.env.EMAIL_PASS);
+  const service = normalizeEnvString(process.env.EMAIL_SERVICE);
+  const connectionTimeout = Number(normalizeEnvString(process.env.EMAIL_CONNECTION_TIMEOUT_MS || "10000"));
+  const greetingTimeout = Number(normalizeEnvString(process.env.EMAIL_GREETING_TIMEOUT_MS || "10000"));
+  const socketTimeout = Number(normalizeEnvString(process.env.EMAIL_SOCKET_TIMEOUT_MS || "15000"));
 
   if (!user || !pass) {
     throw buildConfigError("EMAIL_USER y EMAIL_PASS son obligatorios para enviar correo por SMTP.");
@@ -38,7 +42,7 @@ function buildTransportConfig() {
   return {
     host,
     port,
-    secure: String(process.env.EMAIL_SECURE || "false") === "true",
+    secure: normalizeEnvString(process.env.EMAIL_SECURE || "false").toLowerCase() === "true",
     auth: { user, pass },
     connectionTimeout,
     greetingTimeout,
@@ -47,11 +51,11 @@ function buildTransportConfig() {
 }
 
 function getDefaultFromAddress() {
-  return process.env.EMAIL_FROM || process.env.EMAIL_USER || "no-reply@makeroute.local";
+  return normalizeEnvString(process.env.EMAIL_FROM || process.env.EMAIL_USER || "no-reply@makeroute.local");
 }
 
 function hasResendConfiguration() {
-  return Boolean(String(process.env.RESEND_API_KEY || "").trim());
+  return Boolean(normalizeEnvString(process.env.RESEND_API_KEY));
 }
 
 function shouldFallbackToResend(error) {
@@ -90,8 +94,9 @@ async function sendWithSmtp({ to, subject, text, html, from }) {
 }
 
 async function sendWithResend({ to, subject, text, html, from }) {
-  const resendApiKey = String(process.env.RESEND_API_KEY || "").trim();
-  const resendFrom = String(process.env.RESEND_FROM || from || "").trim();
+  const resendApiKey = normalizeEnvString(process.env.RESEND_API_KEY);
+  const resendFrom = normalizeEnvString(process.env.RESEND_FROM || from || "");
+  const recipient = normalizeEnvString(to);
 
   if (!resendApiKey) {
     throw buildConfigError("RESEND_API_KEY es obligatorio para enviar correo con Resend.");
@@ -106,7 +111,7 @@ async function sendWithResend({ to, subject, text, html, from }) {
       RESEND_API_URL,
       {
         from: resendFrom,
-        to: [to],
+        to: [recipient],
         subject,
         text,
         html,
@@ -133,7 +138,9 @@ async function sendWithResend({ to, subject, text, html, from }) {
 }
 
 async function sendEmail({ to, subject, text, html, from = getDefaultFromAddress() }) {
-  if (String(process.env.EMAIL_LOG_ONLY || "false") === "true") {
+  const logOnly = normalizeEnvString(process.env.EMAIL_LOG_ONLY || "false").toLowerCase() === "true";
+
+  if (logOnly) {
     console.log("[email] log-only password recovery delivery", {
       to,
       subject,
@@ -142,7 +149,7 @@ async function sendEmail({ to, subject, text, html, from = getDefaultFromAddress
     return;
   }
 
-  const provider = String(process.env.EMAIL_PROVIDER || "smtp").trim().toLowerCase();
+  const provider = normalizeEnvString(process.env.EMAIL_PROVIDER || "smtp").toLowerCase();
 
   if (provider === "resend") {
     await sendWithResend({ to, subject, text, html, from });

@@ -7,7 +7,12 @@ const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehi
 const { getDispatchPage, getDispatchConfig, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
 const { createPickingReport, listRecentPickingReports, getPickingSummary, getPickingReportById, getPickingReportByOrderNumber, createPickingErrorReport, updatePickingReport, deletePickingReport } = require('../controllers/picking.controllers');
-const { sendTestEmailByAdmin, sendReminderEmailByAdmin } = require('../controllers/notifications.controllers');
+const {
+  sendTestEmailByAdmin,
+  sendReminderEmailByAdmin,
+  sendTestWhatsAppByAdmin,
+  sendReminderWhatsAppByAdmin,
+} = require('../controllers/notifications.controllers');
 const despachoRoutes = require('./despacho.routes');
 const router = express.Router();
 
@@ -51,6 +56,8 @@ router.patch('/internal/admin/users/:userId/password', requireAdminRole, updateU
 router.post('/internal/admin/users', requireAdminRole, register);
 router.post('/internal/admin/notifications/email-test', requireAdminRole, sendTestEmailByAdmin);
 router.post('/internal/admin/notifications/reminder-email', requireAdminRole, sendReminderEmailByAdmin);
+router.post('/internal/admin/notifications/whatsapp-test', requireAdminRole, sendTestWhatsAppByAdmin);
+router.post('/internal/admin/notifications/reminder-whatsapp', requireAdminRole, sendReminderWhatsAppByAdmin);
 
 // Rutas de clientes
 router.post('/registerClient', registerClient);

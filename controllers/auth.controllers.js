@@ -17,6 +17,17 @@ const ALLOW_PUBLIC_SIGNUP = String(process.env.ALLOW_PUBLIC_SIGNUP || "false") =
 
 const normalizeUsername = (value) => (typeof value === "string" ? value.trim() : "");
 const normalizeEmail = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+const normalizePhoneNumber = (value) => {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("+")
+    ? `+${raw.slice(1).replace(/\D/g, "")}`
+    : raw.replace(/\D/g, "");
+};
 const normalizeRole = (value) => (String(value || "").trim().toLowerCase() === ADMIN_ROLE ? ADMIN_ROLE : USER_ROLE);
 
 const FIXED_ADMIN_EMAILS = new Set([
@@ -262,6 +273,8 @@ const register = async (req, res) => {
     const username = normalizeUsername(req.body?.username);
     const password = String(req.body?.password || "");
     const email = normalizeEmail(req.body?.email);
+    const phone = normalizePhoneNumber(req.body?.phone);
+    const whatsappNumber = normalizePhoneNumber(req.body?.whatsappNumber || phone);
     const requestedRole = normalizeRole(req.body?.role);
 
     const passwordError = ensurePasswordQuality(password);
@@ -317,6 +330,8 @@ const register = async (req, res) => {
       username,
       password: hashedPassword,
       email,
+      phone,
+      whatsappNumber,
       role: finalRole,
       approvalRequired: !shouldAutoApprove,
       isApproved: shouldAutoApprove,
