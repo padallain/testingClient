@@ -1223,6 +1223,58 @@ const addStopToDriverRoute = async (req, res) => {
   }
 };
 
+const removeStopFromDriverRoute = async (req, res) => {
+  try {
+    const { routeId, clientId } = req.params;
+    const normalizedClientId = String(clientId || "").trim();
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    if (!normalizedClientId) {
+      return res.status(400).json({ message: "Client ID is required" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const currentStops = Array.isArray(assignment.stops)
+      ? assignment.stops.map((stop) => (stop?.toObject ? stop.toObject() : stop))
+      : [];
+
+    if (currentStops.length <= 1) {
+      return res.status(400).json({ message: "The route must keep at least one client" });
+    }
+
+    const stopExists = currentStops.some((stop) => String(stop?.clientId || "") === normalizedClientId);
+
+    if (!stopExists) {
+      return res.status(404).json({ message: "Stop not found in route" });
+    }
+
+    const nextStops = currentStops.filter((stop) => String(stop?.clientId || "") !== normalizedClientId);
+
+    await applyRouteArtifactsToAssignment(assignment, nextStops);
+    assignment.uniqueClientCount = assignment.stops.length;
+    assignment.wasDriverModified = true;
+    assignment.driverModifiedAt = new Date();
+    assignment.status = calculateRouteStatus(assignment);
+    await assignment.save();
+
+    return res.status(200).json({
+      message: "Client removed from route successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error eliminando cliente de ruta del chofer:", err);
+    return res.status(500).json({ message: "Error removing client from driver route" });
+  }
+};
+
 const customizeDriverRoute = async (req, res) => {
   try {
     const { routeId } = req.params;
@@ -1748,6 +1800,7 @@ module.exports = {
   deleteRouteAssignment,
   updateStopDispatchStatus,
   addStopToDriverRoute,
+  removeStopFromDriverRoute,
   reoptimizeDriverRoute,
   previewDriverRouteCustomization,
   customizeDriverRoute,
