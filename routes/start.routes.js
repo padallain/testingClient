@@ -1,6 +1,6 @@
 const express = require('express');
 const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, listUsersForAdmin, approveUserByAdmin, updateUserPasswordByAdmin, authMiddleware, requireAdminRole } = require('../controllers/auth.controllers');
-const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, addStopToDriverRoute, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
+const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, addStopToDriverRoute, reoptimizeDriverRoute, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
@@ -87,6 +87,7 @@ router.patch('/internal/admin/routes/:routeId', requireAdminRole, requireAdminDe
 router.delete('/internal/admin/routes/:routeId', requireAdminRole, requireAdminDeleteKey, deleteRouteAssignment);
 router.patch('/driver-routes/:routeId/stops/:clientId/dispatch', updateStopDispatchStatus);
 router.post('/driver-routes/:routeId/stops', addStopToDriverRoute);
+router.post('/driver-routes/:routeId/reoptimize', reoptimizeDriverRoute);
 router.patch('/driver-routes/:routeId/missing/:clientId/resolve', updateMissingClientResolution);
 router.post('/driver-routes/:routeId/stops/:clientId/issues', createDispatchIssueReport);
 router.post('/internal/admin/driver-routes/:routeId/stops/:clientId/issues', requireAdminRole, requireAdminDeleteKey, createDispatchIssueReport);

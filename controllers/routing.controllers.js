@@ -1278,6 +1278,83 @@ const customizeDriverRoute = async (req, res) => {
   }
 };
 
+const reoptimizeDriverRoute = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const currentStops = Array.isArray(assignment.stops)
+      ? assignment.stops.map((stop) => (stop?.toObject ? stop.toObject() : stop))
+      : [];
+
+    if (currentStops.length < 2) {
+      return res.status(200).json({
+        message: "Route is already optimal for current number of stops",
+        route: assignment,
+      });
+    }
+
+    const optimizedRoute = await buildOptimizedRoute(currentStops.map((stop) => ({
+      id: stop.clientId,
+      nombre: stop.nombre,
+      weight: stop.weight,
+      location: stop.location,
+    })));
+
+    if (!Array.isArray(optimizedRoute) || optimizedRoute.length !== currentStops.length) {
+      return res.status(400).json({
+        message: "Could not recalculate an optimized route with the current stops",
+      });
+    }
+
+    const stopsByClientId = new Map(currentStops.map((stop) => [String(stop.clientId), stop]));
+    const optimizedStops = optimizedRoute.map((client, index) => {
+      const existingStop = stopsByClientId.get(String(client.id));
+
+      return {
+        ...existingStop,
+        order: index + 1,
+        clientId: String(client.id),
+        nombre: existingStop?.nombre || client.nombre,
+        weight: Number(existingStop?.weight ?? client.weight) || 0,
+        location: existingStop?.location || client.location,
+        googleMapsLink: existingStop?.googleMapsLink
+          || `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`,
+      };
+    });
+
+    await applyRouteArtifactsToAssignment(assignment, optimizedStops);
+    assignment.uniqueClientCount = assignment.stops.length;
+    assignment.routeType = "closest";
+    assignment.routeTypeLabel = "Mas cercana";
+    assignment.wasDriverModified = true;
+    assignment.driverModifiedAt = new Date();
+    assignment.originalStops = assignment.stops.map((stop) => (stop?.toObject ? stop.toObject() : stop));
+    assignment.originalGoogleMapsRouteLinks = [...assignment.googleMapsRouteLinks];
+    assignment.originalOpenRouteLink = assignment.openRouteLink;
+    assignment.originalTotalDistanceKm = assignment.totalDistanceKm;
+    assignment.status = calculateRouteStatus(assignment);
+    await assignment.save();
+
+    return res.status(200).json({
+      message: "Route re-optimized successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error recalculando ruta optima del chofer:", err);
+    return res.status(500).json({ message: "Error re-optimizing driver route" });
+  }
+};
+
 const previewDriverRouteCustomization = async (req, res) => {
   try {
     const { routeId } = req.params;
@@ -1671,6 +1748,7 @@ module.exports = {
   deleteRouteAssignment,
   updateStopDispatchStatus,
   addStopToDriverRoute,
+  reoptimizeDriverRoute,
   previewDriverRouteCustomization,
   customizeDriverRoute,
   resetDriverRoute,
