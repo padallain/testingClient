@@ -577,7 +577,10 @@ const makeRoute = async (req, res) => {
     const { ids, stops, driverId, driverName, routeLabel, routeType, routeComment } = req.body;
     const routeWeight = normalizeWeight(req.body?.routeWeight);
     const anchorClientId = typeof req.body?.anchorClientId === "string" ? req.body.anchorClientId.trim() : null;
+    const anchorSucursal = typeof req.body?.anchorSucursal === "string" ? req.body.anchorSucursal.trim() : null;
+    const anchorStopKey = typeof req.body?.anchorStopKey === "string" ? req.body.anchorStopKey.trim() : null;
     const { normalizedStops, uniqueStops, duplicateClientIds } = normalizeRequestedStops({ ids, stops });
+    const preserveRouteOrder = Boolean(req.body?.preserveRouteOrder);
 
     if (!Array.isArray(normalizedStops)) {
       return res
@@ -613,7 +616,20 @@ const makeRoute = async (req, res) => {
       }));
     const notFoundIds = notFoundClients.map((c) => c.clientId);
     const uniqueIds = uniqueStops.map((stop) => stop.clientId);
-    const routeOptions = await buildRouteOptions(clients, { anchorClientId: anchorClientId || undefined });
+    const explicitRouteOrder = preserveRouteOrder
+      ? uniqueStops.map(({ clientId, sucursal }) => {
+        const match = clients.find((client) =>
+          String(client.id) === String(clientId)
+          && (!sucursal || String(client.sucursal || "") === String(sucursal)));
+
+        return match || null;
+      }).filter(Boolean)
+      : [];
+    const routeOptions = await buildRouteOptions(clients, {
+      anchorClientId: anchorClientId || undefined,
+      anchorSucursal: anchorSucursal || undefined,
+      anchorStopKey: anchorStopKey || undefined,
+    });
 
     if (routeOptions.length < 1) {
       return res
@@ -627,7 +643,23 @@ const makeRoute = async (req, res) => {
 
     const normalizedRouteType = String(routeType || "").trim().toLowerCase();
     const recommendedRouteOption = routeOptions[0];
-    const selectedRouteOption = routeOptions.find((option) => option.type === normalizedRouteType) || recommendedRouteOption;
+    const baseSelectedRouteOption = routeOptions.find((option) => option.type === normalizedRouteType) || recommendedRouteOption;
+    const selectedRouteOption = preserveRouteOrder && explicitRouteOrder.length === uniqueStops.length
+      ? {
+        ...baseSelectedRouteOption,
+        type: normalizedRouteType || baseSelectedRouteOption.type,
+        label: baseSelectedRouteOption.label,
+        description: baseSelectedRouteOption.description,
+        estimatedDistanceKm: baseSelectedRouteOption.estimatedDistanceKm,
+        route: explicitRouteOrder.map((client) => ({
+          id: client.id,
+          nombre: client.nombre,
+          weight: Number(client.weight) || 0,
+          location: client.location,
+          sucursal: client.sucursal || "",
+        })),
+      }
+      : baseSelectedRouteOption;
     const { response, googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(selectedRouteOption.route);
     const responseRouteOptions = routeOptions.map((option) => {
       const optionArtifacts = buildRouteArtifacts(option.route);

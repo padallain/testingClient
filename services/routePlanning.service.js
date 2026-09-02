@@ -161,11 +161,48 @@ const buildMissingClients = (uniqueIds, foundIds) => {
   };
 };
 
+const buildClientStopKey = (client) => {
+  const clientId = String(client?.id ?? client?.clientId ?? "").trim();
+  const sucursal = typeof client?.sucursal === "string" ? client.sucursal.trim() : "";
+
+  return sucursal ? `${clientId}|${sucursal}` : clientId;
+};
+
+const matchAnchorClient = (client, anchorId, anchorSucursal = null, anchorStopKey = null) => {
+  if (!anchorId && !anchorStopKey) {
+    return false;
+  }
+
+  const normalizedAnchorId = String(anchorId || "").trim();
+  const normalizedSucursal = typeof anchorSucursal === "string" ? anchorSucursal.trim() : "";
+  const normalizedStopKey = typeof anchorStopKey === "string" ? anchorStopKey.trim() : "";
+  const clientStopKey = buildClientStopKey(client);
+
+  if (normalizedStopKey) {
+    return clientStopKey === normalizedStopKey;
+  }
+
+  if (normalizedAnchorId && normalizedSucursal) {
+    return client.id === normalizedAnchorId && String(client?.sucursal || "") === normalizedSucursal;
+  }
+
+  if (normalizedAnchorId) {
+    return client.id === normalizedAnchorId;
+  }
+
+  return false;
+};
+
 const getClientsWithCoordinates = (clients) => clients.filter((client) => hasValidLocation(client?.location));
 
-const splitStartClient = (clients, anchorId) => {
+const splitStartClient = (clients, anchorId, anchorSucursal = null, anchorStopKey = null) => {
   const effectiveAnchorId = anchorId || START_ID;
-  const startClientIndex = clients.findIndex((client) => client.id === effectiveAnchorId);
+  const startClientIndex = clients.findIndex((client) => matchAnchorClient(
+    client,
+    anchorStopKey ? null : effectiveAnchorId,
+    anchorSucursal,
+    anchorStopKey,
+  ));
   const startClient = startClientIndex !== -1 ? clients[startClientIndex] : null;
   const restClients = startClientIndex !== -1
     ? [
@@ -226,7 +263,7 @@ const resolveRouteOrigin = (route) => {
   return routeUsesCabimasOrigin(route) ? CABIMAS_ROUTE_ORIGIN : ORIGIN;
 };
 
-const buildIndexedClients = (clients, anchorId) => {
+const buildIndexedClients = (clients, anchorId, anchorSucursal = null, anchorStopKey = null) => {
   const clientsWithCoordinates = getClientsWithCoordinates(clients);
 
   if (clientsWithCoordinates.length === 0) {
@@ -236,7 +273,12 @@ const buildIndexedClients = (clients, anchorId) => {
     };
   }
 
-  const { startClient, restClients } = splitStartClient(clientsWithCoordinates, anchorId);
+  const { startClient, restClients } = splitStartClient(
+    clientsWithCoordinates,
+    anchorId,
+    anchorSucursal,
+    anchorStopKey,
+  );
   const orderedClients = startClient ? [startClient, ...restClients] : restClients;
 
   return {
@@ -536,7 +578,12 @@ const calculateRouteDistanceFallback = (route, origin = ORIGIN) => {
 };
 
 const buildRouteContext = async (clients, options = {}) => {
-  const { startClient, indexedClients } = buildIndexedClients(clients, options.anchorClientId);
+  const { startClient, indexedClients } = buildIndexedClients(
+    clients,
+    options.anchorClientId,
+    options.anchorSucursal,
+    options.anchorStopKey,
+  );
   const routeOrigin = resolveRouteOrigin(indexedClients);
 
   if (indexedClients.length === 0) {
