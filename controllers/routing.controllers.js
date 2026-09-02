@@ -1110,6 +1110,119 @@ const updateStopDispatchStatus = async (req, res) => {
   }
 };
 
+const addStopToDriverRoute = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+    const normalizedClientId = String(req.body?.clientId || req.body?.id || "").trim();
+    const hasSucursalField = Object.prototype.hasOwnProperty.call(req.body || {}, "sucursal");
+    const normalizedSucursal = hasSucursalField && typeof req.body?.sucursal === "string"
+      ? req.body.sucursal.trim()
+      : "";
+    const requestedPosition = Number(req.body?.position);
+
+    if (!routeId) {
+      return res.status(400).json({ message: "Route ID is required" });
+    }
+
+    if (!normalizedClientId) {
+      return res.status(400).json({ message: "Client ID is required" });
+    }
+
+    const assignment = await RouteAssignment.findById(routeId);
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Route not found" });
+    }
+
+    const currentStops = Array.isArray(assignment.stops)
+      ? assignment.stops.map((stop) => (stop?.toObject ? stop.toObject() : stop))
+      : [];
+
+    if (currentStops.some((stop) => String(stop?.clientId || "") === normalizedClientId)) {
+      return res.status(409).json({ message: "This client is already part of the route" });
+    }
+
+    const clientQuery = hasSucursalField
+      ? { id: normalizedClientId, sucursal: normalizedSucursal }
+      : { id: normalizedClientId };
+    const matchedClients = await Client.find(clientQuery).lean();
+
+    if (matchedClients.length === 0) {
+      return res.status(404).json({ message: `Client ${normalizedClientId} was not found` });
+    }
+
+    if (!hasSucursalField && matchedClients.length > 1) {
+      const branches = matchedClients.map((client) => {
+        const branchName = String(client?.sucursal || "").trim();
+        const latitude = Number(client?.location?.latitude);
+        const longitude = Number(client?.location?.longitude);
+        const hasValidCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
+
+        return {
+          sucursal: branchName,
+          label: branchName || "Principal",
+          nombre: String(client?.nombre || normalizedClientId).trim(),
+          hasValidCoordinates,
+        };
+      });
+
+      return res.status(409).json({
+        message: "This client has multiple branches. Pick one before adding.",
+        requiresBranchSelection: true,
+        branches,
+      });
+    }
+
+    const selectedClient = matchedClients[0];
+    const hasValidCoordinates = Number.isFinite(Number(selectedClient?.location?.latitude))
+      && Number.isFinite(Number(selectedClient?.location?.longitude));
+
+    if (!hasValidCoordinates) {
+      return res.status(400).json({ message: "The selected client does not have valid coordinates" });
+    }
+
+    const displayName = String(selectedClient?.nombre || normalizedClientId).trim();
+    const branchSuffix = String(selectedClient?.sucursal || "").trim();
+    const nextStop = {
+      order: currentStops.length + 1,
+      clientId: normalizedClientId,
+      nombre: branchSuffix ? `${displayName} (${branchSuffix})` : displayName,
+      weight: Number(selectedClient?.weight) || 0,
+      location: {
+        latitude: Number(selectedClient.location.latitude),
+        longitude: Number(selectedClient.location.longitude),
+      },
+      googleMapsLink: `https://www.google.com/maps?q=${selectedClient.location.latitude},${selectedClient.location.longitude}`,
+      dispatched: false,
+      dispatchedAt: null,
+    };
+
+    const nextStops = [...currentStops];
+
+    if (Number.isFinite(requestedPosition) && requestedPosition > 0) {
+      const clampedPosition = Math.max(1, Math.min(nextStops.length + 1, Math.round(requestedPosition)));
+      nextStops.splice(clampedPosition - 1, 0, nextStop);
+    } else {
+      nextStops.push(nextStop);
+    }
+
+    await applyRouteArtifactsToAssignment(assignment, nextStops);
+    assignment.uniqueClientCount = assignment.stops.length;
+    assignment.wasDriverModified = true;
+    assignment.driverModifiedAt = new Date();
+    assignment.status = calculateRouteStatus(assignment);
+    await assignment.save();
+
+    return res.status(200).json({
+      message: "Client added to route successfully",
+      route: assignment,
+    });
+  } catch (err) {
+    console.log("Error agregando cliente a ruta del chofer:", err);
+    return res.status(500).json({ message: "Error adding client to driver route" });
+  }
+};
+
 const customizeDriverRoute = async (req, res) => {
   try {
     const { routeId } = req.params;
@@ -1557,6 +1670,7 @@ module.exports = {
   updateRouteAssignment,
   deleteRouteAssignment,
   updateStopDispatchStatus,
+  addStopToDriverRoute,
   previewDriverRouteCustomization,
   customizeDriverRoute,
   resetDriverRoute,
