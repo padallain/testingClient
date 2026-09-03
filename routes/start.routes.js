@@ -1,8 +1,9 @@
 const express = require('express');
-const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, listUsersForAdmin, approveUserByAdmin, updateUserPasswordByAdmin, authMiddleware, requireAdminRole } = require('../controllers/auth.controllers');
+const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, listUsersForAdmin, listReporterUsersForAdmin, approveUserByAdmin, updateUserRoleByAdmin, updateUserPasswordByAdmin, authMiddleware, requireAdminRole } = require('../controllers/auth.controllers');
 const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, addStopToDriverRoute, removeStopFromDriverRoute, reoptimizeDriverRoute, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
-const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
+const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, getDailyFuelConsumption, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
+const { createFuelReport, getDailyFuelConsumptionFromReports } = require('../controllers/fuelReport.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const { getDispatchPage, getDispatchConfig, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
@@ -51,7 +52,9 @@ router.use(authMiddleware);
 
 // Administración de usuarios
 router.get('/internal/admin/users', requireAdminRole, listUsersForAdmin);
+router.get('/internal/admin/users/reporters', requireAdminRole, listReporterUsersForAdmin);
 router.patch('/internal/admin/users/:userId/approval', requireAdminRole, approveUserByAdmin);
+router.patch('/internal/admin/users/:userId/role', requireAdminRole, updateUserRoleByAdmin);
 router.patch('/internal/admin/users/:userId/password', requireAdminRole, updateUserPasswordByAdmin);
 router.post('/internal/admin/users', requireAdminRole, register);
 router.post('/internal/admin/notifications/email-test', requireAdminRole, sendTestEmailByAdmin);
@@ -97,6 +100,9 @@ router.patch('/internal/admin/dispatchIssueReports/:reportId', requireAdminRole,
 router.delete('/internal/admin/dispatchIssueReports/:reportId', requireAdminRole, requireAdminDeleteKey, deleteDispatchIssueReport);
 router.post('/dailyCheck', createDailyCheck);
 router.get('/dailyCheck', getRecentDailyChecks);
+router.get('/fuel-consumption/daily', getDailyFuelConsumption);
+router.post('/fuel-reports', createFuelReport);
+router.get('/fuel-reports/daily-summary', getDailyFuelConsumptionFromReports);
 router.get('/dailyCheck/placa/:placa', getDailyChecksByPlaca);
 router.get('/dailyCheck/:id', getDailyCheckById);
 router.patch('/internal/admin/dailyCheck/:id', requireAdminRole, requireAdminDeleteKey, updateDailyCheck);

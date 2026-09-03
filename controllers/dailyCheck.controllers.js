@@ -39,6 +39,62 @@ const hasInvalidChecklistItem = (checklist) =>
 			(item.estado === "NO_OK" && !item.comentario),
 	);
 
+const normalizeFuelLoad = (fuelLoad) => {
+	const didRefuel = Boolean(fuelLoad?.didRefuel);
+
+	if (!didRefuel) {
+		return {
+			didRefuel: false,
+			fuelType: "",
+			liters: 0,
+			odometerKm: null,
+			totalAmount: null,
+			station: "",
+			notes: "",
+		};
+	}
+
+	const fuelType = String(fuelLoad?.fuelType || "").trim().toLowerCase();
+	const liters = Number(fuelLoad?.liters);
+	const odometerKm = Number(fuelLoad?.odometerKm);
+	const totalAmountRaw = fuelLoad?.totalAmount;
+	const totalAmount = totalAmountRaw === "" || totalAmountRaw == null ? null : Number(totalAmountRaw);
+
+	return {
+		didRefuel,
+		fuelType,
+		liters,
+		odometerKm,
+		totalAmount,
+		station: typeof fuelLoad?.station === "string" ? fuelLoad.station.trim() : "",
+		notes: typeof fuelLoad?.notes === "string" ? fuelLoad.notes.trim() : "",
+	};
+};
+
+const validateFuelLoad = (fuelLoad) => {
+	if (!fuelLoad?.didRefuel) {
+		return "";
+	}
+
+	if (!["gasoil", "gasolina"].includes(fuelLoad.fuelType)) {
+		return "Selecciona el tipo de combustible (gasoil o gasolina).";
+	}
+
+	if (!Number.isFinite(fuelLoad.liters) || fuelLoad.liters <= 0) {
+		return "Los litros cargados deben ser mayores a 0.";
+	}
+
+	if (!Number.isFinite(fuelLoad.odometerKm) || fuelLoad.odometerKm < 0) {
+		return "El odometro en km es obligatorio para calcular consumo diario.";
+	}
+
+	if (fuelLoad.totalAmount != null && (!Number.isFinite(fuelLoad.totalAmount) || fuelLoad.totalAmount < 0)) {
+		return "El monto total de combustible no es valido.";
+	}
+
+	return "";
+};
+
 const getRecentDailyChecks = async (req, res) => {
 	try {
 		const requestedLimit = Number(req.query.limit);
@@ -66,6 +122,7 @@ const createDailyCheck = async (req, res) => {
 	try {
 		const { placa, modelo, anio, checklist, observaciones } = req.body;
 		const chofer = resolveDriverName(req);
+		const normalizedFuelLoad = normalizeFuelLoad(req.body?.fuelLoad || {});
 
 		if (!chofer || !placa || !modelo || !anio) {
 			return res.status(400).json({
@@ -89,12 +146,19 @@ const createDailyCheck = async (req, res) => {
 			});
 		}
 
+		const fuelLoadValidationMessage = validateFuelLoad(normalizedFuelLoad);
+
+		if (fuelLoadValidationMessage) {
+			return res.status(400).json({ message: fuelLoadValidationMessage });
+		}
+
 		const newDailyCheck = new DailyCheck({
 			chofer: chofer.trim(),
 			placa: normalizePlaca(placa),
 			modelo: modelo.trim(),
 			anio: Number(anio),
 			checklist: normalizedChecklist,
+			fuelLoad: normalizedFuelLoad,
 			observaciones: typeof observaciones === "string" ? observaciones.trim() : "",
 		});
 
@@ -174,6 +238,7 @@ const updateDailyCheck = async (req, res) => {
 	try {
 		const { id } = req.params;
 		const { chofer, placa, modelo, anio, checklist, observaciones } = req.body;
+		const normalizedFuelLoad = normalizeFuelLoad(req.body?.fuelLoad || {});
 
 		if (!mongoose.Types.ObjectId.isValid(id)) {
 			return res.status(400).json({
@@ -201,6 +266,12 @@ const updateDailyCheck = async (req, res) => {
 			});
 		}
 
+		const fuelLoadValidationMessage = validateFuelLoad(normalizedFuelLoad);
+
+		if (fuelLoadValidationMessage) {
+			return res.status(400).json({ message: fuelLoadValidationMessage });
+		}
+
 		const dailyCheck = await DailyCheck.findById(id);
 
 		if (!dailyCheck) {
@@ -214,6 +285,7 @@ const updateDailyCheck = async (req, res) => {
 		dailyCheck.modelo = modelo.trim();
 		dailyCheck.anio = Number(anio);
 		dailyCheck.checklist = normalizedChecklist;
+		dailyCheck.fuelLoad = normalizedFuelLoad;
 		dailyCheck.observaciones = typeof observaciones === "string" ? observaciones.trim() : "";
 
 		await dailyCheck.save();
@@ -227,6 +299,108 @@ const updateDailyCheck = async (req, res) => {
 		return res.status(500).json({
 			message: "Error actualizando el reporte diario",
 		});
+	}
+};
+
+const getDailyFuelConsumption = async (req, res) => {
+	try {
+		const requestedDays = Number(req.query.days);
+		const days = Number.isFinite(requestedDays) && requestedDays > 0
+			? Math.min(Math.round(requestedDays), 60)
+			: 14;
+		const placaFilter = normalizePlaca(req.query.placa);
+		const choferFilter = typeof req.query.chofer === "string" ? req.query.chofer.trim() : "";
+		const startDate = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
+
+		const query = {
+			"fuelLoad.didRefuel": true,
+			fechaHoraRegistro: { $gte: startDate },
+		};
+
+		if (placaFilter) {
+			query.placa = placaFilter;
+		}
+
+		if (choferFilter) {
+			query.chofer = choferFilter;
+		}
+
+		const records = await DailyCheck.find(query)
+			.sort({ placa: 1, fechaHoraRegistro: 1 })
+			.lean();
+
+		const previousOdometerByPlaca = new Map();
+		const summaryByDay = new Map();
+
+		records.forEach((record) => {
+			const dateKey = new Date(record.fechaHoraRegistro).toISOString().slice(0, 10);
+			const placa = normalizePlaca(record.placa);
+			const liters = Number(record?.fuelLoad?.liters) || 0;
+			const totalAmount = Number(record?.fuelLoad?.totalAmount);
+			const odometerKm = Number(record?.fuelLoad?.odometerKm);
+
+			const currentSummary = summaryByDay.get(dateKey) || {
+				date: dateKey,
+				refills: 0,
+				litersTotal: 0,
+				amountTotal: 0,
+				distanceKmTotal: 0,
+				efficiencySampleCount: 0,
+				kmPerLiter: null,
+			};
+
+			currentSummary.refills += 1;
+			currentSummary.litersTotal += liters;
+
+			if (Number.isFinite(totalAmount) && totalAmount >= 0) {
+				currentSummary.amountTotal += totalAmount;
+			}
+
+			const previousOdometer = previousOdometerByPlaca.get(placa);
+
+			if (Number.isFinite(odometerKm) && Number.isFinite(previousOdometer) && odometerKm > previousOdometer && liters > 0) {
+				const distanceDeltaKm = odometerKm - previousOdometer;
+				currentSummary.distanceKmTotal += distanceDeltaKm;
+				currentSummary.efficiencySampleCount += 1;
+			}
+
+			if (Number.isFinite(odometerKm)) {
+				previousOdometerByPlaca.set(placa, odometerKm);
+			}
+
+			summaryByDay.set(dateKey, currentSummary);
+		});
+
+		const daily = Array.from(summaryByDay.values())
+			.sort((left, right) => left.date.localeCompare(right.date))
+			.map((item) => {
+				const litersTotal = Number(item.litersTotal.toFixed(2));
+				const amountTotal = Number(item.amountTotal.toFixed(2));
+				const distanceKmTotal = Number(item.distanceKmTotal.toFixed(2));
+				const kmPerLiter = item.distanceKmTotal > 0 && item.litersTotal > 0
+					? Number((item.distanceKmTotal / item.litersTotal).toFixed(2))
+					: null;
+
+				return {
+					date: item.date,
+					refills: item.refills,
+					litersTotal,
+					amountTotal,
+					distanceKmTotal,
+					kmPerLiter,
+				};
+			});
+
+		return res.status(200).json({
+			days,
+			placa: placaFilter || null,
+			chofer: choferFilter || null,
+			totalRecords: records.length,
+			daily,
+		});
+	} catch (error) {
+		console.log("Error obteniendo consumo diario de combustible:", error);
+		return res.status(500).json({ message: "Error obteniendo consumo diario de combustible" });
 	}
 };
 
@@ -265,6 +439,7 @@ module.exports = {
 	createDailyCheck,
 	getDailyCheckById,
 	getDailyChecksByPlaca,
+	getDailyFuelConsumption,
 	updateDailyCheck,
 	deleteDailyCheck,
 };

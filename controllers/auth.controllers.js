@@ -1,4 +1,8 @@
 const User = require("../models/user.model");
+const DailyCheck = require("../models/dailyCheck.model");
+const ClientLocationReport = require("../models/clientLocationReport.model");
+const DispatchIssueReport = require("../models/dispatchIssueReport.model");
+const FuelReport = require("../models/fuelReport.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { sendEmail } = require("../services/sendEmail");
@@ -12,6 +16,7 @@ const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || process.env.SESSION_S
 const USERNAME_COLLATION = { locale: "en", strength: 3 };
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ADMIN_ROLE = "admin";
+const DRIVER_ROLE = "chofer";
 const USER_ROLE = "user";
 const ALLOW_PUBLIC_SIGNUP = String(process.env.ALLOW_PUBLIC_SIGNUP || "false") === "true";
 
@@ -28,7 +33,19 @@ const normalizePhoneNumber = (value) => {
     ? `+${raw.slice(1).replace(/\D/g, "")}`
     : raw.replace(/\D/g, "");
 };
-const normalizeRole = (value) => (String(value || "").trim().toLowerCase() === ADMIN_ROLE ? ADMIN_ROLE : USER_ROLE);
+const normalizeRole = (value) => {
+  const normalizedValue = String(value || "").trim().toLowerCase();
+
+  if (normalizedValue === ADMIN_ROLE) {
+    return ADMIN_ROLE;
+  }
+
+  if (normalizedValue === DRIVER_ROLE) {
+    return DRIVER_ROLE;
+  }
+
+  return USER_ROLE;
+};
 
 const FIXED_ADMIN_EMAILS = new Set([
   "egjrch@gmail.com",
@@ -665,6 +682,165 @@ const approveUserByAdmin = async (req, res) => {
   }
 };
 
+const updateUserRoleByAdmin = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const requestedRole = normalizeRole(req.body?.role);
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.role = requestedRole;
+    await user.save();
+
+    return res.status(200).json({
+      message: "Rol actualizado correctamente.",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        isApproved: user.isApproved,
+      },
+    });
+  } catch (err) {
+    console.log("Error actualizando rol de usuario:", err);
+    return res.status(500).json({ message: "No se pudo actualizar el rol del usuario." });
+  }
+};
+
+const listReporterUsersForAdmin = async (_req, res) => {
+  try {
+    const [users, dailyChecks, clientLocationReports, dispatchIssueReports, fuelReports] = await Promise.all([
+      User.find({ isApproved: true })
+        .select("username email role isApproved approvedAt createdAt")
+        .lean(),
+      DailyCheck.find().select("chofer").lean(),
+      ClientLocationReport.find().select("reporterName").lean(),
+      DispatchIssueReport.find().select("driverId driverName").lean(),
+      FuelReport.find().select("chofer").lean(),
+    ]);
+
+    const activityByIdentity = new Map();
+
+    const addActivity = (identity, source) => {
+      const normalizedIdentity = String(identity || "").trim().toLowerCase();
+
+      if (!normalizedIdentity) {
+        return;
+      }
+
+      const current = activityByIdentity.get(normalizedIdentity) || {
+        identity: normalizedIdentity,
+        totalReports: 0,
+        sources: {
+          dailyCheck: 0,
+          clientLocation: 0,
+          dispatchIssue: 0,
+          fuelReport: 0,
+        },
+      };
+
+      current.totalReports += 1;
+
+      if (current.sources[source] != null) {
+        current.sources[source] += 1;
+      }
+
+      activityByIdentity.set(normalizedIdentity, current);
+    };
+
+    dailyChecks.forEach((report) => addActivity(report?.chofer, "dailyCheck"));
+    clientLocationReports.forEach((report) => addActivity(report?.reporterName, "clientLocation"));
+    dispatchIssueReports.forEach((report) => {
+      addActivity(report?.driverId, "dispatchIssue");
+      addActivity(report?.driverName, "dispatchIssue");
+    });
+    fuelReports.forEach((report) => addActivity(report?.chofer, "fuelReport"));
+
+    const usersById = new Map(users.map((user) => [String(user?._id || ""), user]));
+    const userIndex = new Map();
+
+    users.forEach((user) => {
+      const userId = String(user?._id || "");
+      const normalizedUsername = String(user?.username || "").trim().toLowerCase();
+      const normalizedEmail = String(user?.email || "").trim().toLowerCase();
+
+      if (!userId) {
+        return;
+      }
+
+      if (normalizedUsername) {
+        userIndex.set(normalizedUsername, userId);
+      }
+
+      if (normalizedEmail) {
+        userIndex.set(normalizedEmail, userId);
+      }
+    });
+
+    const reporterUsersById = new Map();
+    const unmatchedReporters = [];
+
+    activityByIdentity.forEach((activity, identity) => {
+      const matchedUserId = userIndex.get(identity);
+
+      if (!matchedUserId) {
+        unmatchedReporters.push({
+          identity,
+          totalReports: activity.totalReports,
+          sources: activity.sources,
+        });
+        return;
+      }
+
+      const matchedUser = usersById.get(matchedUserId);
+
+      if (!matchedUser) {
+        return;
+      }
+
+      const current = reporterUsersById.get(matchedUserId) || {
+        id: matchedUserId,
+        username: matchedUser.username,
+        email: matchedUser.email,
+        role: normalizeRole(matchedUser.role),
+        isApproved: matchedUser.isApproved !== false,
+        totalReports: 0,
+        sources: {
+          dailyCheck: 0,
+          clientLocation: 0,
+          dispatchIssue: 0,
+          fuelReport: 0,
+        },
+      };
+
+      current.totalReports += activity.totalReports;
+      current.sources.dailyCheck += activity.sources.dailyCheck;
+      current.sources.clientLocation += activity.sources.clientLocation;
+      current.sources.dispatchIssue += activity.sources.dispatchIssue;
+      current.sources.fuelReport += activity.sources.fuelReport;
+      reporterUsersById.set(matchedUserId, current);
+    });
+
+    const reporters = Array.from(reporterUsersById.values())
+      .sort((left, right) => right.totalReports - left.totalReports);
+    const unmatched = unmatchedReporters.sort((left, right) => right.totalReports - left.totalReports);
+
+    return res.status(200).json({ reporters, unmatchedReporters: unmatched });
+  } catch (err) {
+    console.log("Error listando usuarios con actividad de reportes:", err);
+    return res.status(500).json({ message: "No se pudieron listar los usuarios con reportes." });
+  }
+};
+
 const updateUserPasswordByAdmin = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -762,7 +938,9 @@ module.exports = {
   verifyPasswordResetCode,
   resetPasswordWithCode,
   listUsersForAdmin,
+  listReporterUsersForAdmin,
   approveUserByAdmin,
+  updateUserRoleByAdmin,
   updateUserPasswordByAdmin,
   authMiddleware,
   requireAdminRole,
