@@ -1148,7 +1148,10 @@ const addStopToDriverRoute = async (req, res) => {
     const matchedClients = await Client.find(clientQuery).lean();
 
     if (matchedClients.length === 0) {
-      return res.status(404).json({ message: `Client ${normalizedClientId} was not found` });
+      return res.status(404).json({
+        message: `El cliente ${normalizedClientId} no esta en la base de datos.`,
+        code: "CLIENT_NOT_FOUND",
+      });
     }
 
     if (!hasSucursalField && matchedClients.length > 1) {
