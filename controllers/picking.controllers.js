@@ -129,7 +129,7 @@ async function getPickingSummary(req, res) {
       },
     };
 
-    const [totals, ranking, topWorker, details] = await Promise.all([
+    const [totals, rankingRaw, details] = await Promise.all([
       PickingReport.aggregate([
         { $match: matchStage },
         {
@@ -150,19 +150,7 @@ async function getPickingSummary(req, res) {
             totalCajas: { $sum: '$numeroCajas' },
           },
         },
-        { $sort: { totalPedidos: -1, totalCajas: -1, _id: 1 } },
-      ]),
-      PickingReport.aggregate([
-        { $match: matchStage },
-        {
-          $group: {
-            _id: '$responsableId',
-            totalPedidos: { $sum: 1 },
-            totalCajas: { $sum: '$numeroCajas' },
-          },
-        },
-        { $sort: { totalPedidos: -1, totalCajas: -1, _id: 1 } },
-        { $limit: 1 },
+        { $sort: { _id: 1 } },
       ]),
       PickingReport.find(matchStage).sort({ fechaHoraRegistro: -1 }).lean(),
     ]);
@@ -190,6 +178,48 @@ async function getPickingSummary(req, res) {
     const totalsRow = totals[0] || { totalPedidos: 0, totalCajas: 0, responsablesActivos: [] };
     const errorMap = new Map(errorRanking.map((item) => [item._id, item.totalErrores]));
     const totalErrores = errorRanking.reduce((sum, item) => sum + (Number(item.totalErrores) || 0), 0);
+    const totalPedidosPeriodo = Number(totalsRow.totalPedidos) || 0;
+    const totalCajasPeriodo = Number(totalsRow.totalCajas) || 0;
+
+    const ranking = rankingRaw
+      .map((item) => {
+        const totalPedidos = Number(item.totalPedidos) || 0;
+        const totalCajas = Number(item.totalCajas) || 0;
+        const pedidoShare = totalPedidosPeriodo > 0 ? totalPedidos / totalPedidosPeriodo : 0;
+        const cajasShare = totalCajasPeriodo > 0 ? totalCajas / totalCajasPeriodo : 0;
+        const relacionPedidosCajas = Number((Math.sqrt(pedidoShare * cajasShare) * 100).toFixed(2));
+        const cajasPorPedido = totalPedidos > 0
+          ? Number((totalCajas / totalPedidos).toFixed(2))
+          : 0;
+
+        return {
+          responsableId: item._id,
+          totalPedidos,
+          totalCajas,
+          totalErrores: errorMap.get(item._id) || 0,
+          pedidoShare: Number((pedidoShare * 100).toFixed(2)),
+          cajasShare: Number((cajasShare * 100).toFixed(2)),
+          cajasPorPedido,
+          relacionPedidosCajas,
+        };
+      })
+      .sort((leftWorker, rightWorker) => {
+        if (rightWorker.relacionPedidosCajas !== leftWorker.relacionPedidosCajas) {
+          return rightWorker.relacionPedidosCajas - leftWorker.relacionPedidosCajas;
+        }
+
+        if (rightWorker.totalPedidos !== leftWorker.totalPedidos) {
+          return rightWorker.totalPedidos - leftWorker.totalPedidos;
+        }
+
+        if (rightWorker.totalCajas !== leftWorker.totalCajas) {
+          return rightWorker.totalCajas - leftWorker.totalCajas;
+        }
+
+        return String(leftWorker.responsableId).localeCompare(String(rightWorker.responsableId));
+      });
+
+    const topWorker = ranking[0] || null;
 
     return res.status(200).json({
       filtro: {
@@ -201,11 +231,15 @@ async function getPickingSummary(req, res) {
         totalCajas: totalsRow.totalCajas || 0,
         totalErrores,
         responsablesActivos: Array.isArray(totalsRow.responsablesActivos) ? totalsRow.responsablesActivos.length : 0,
-        responsableConMasPicking: topWorker[0]
+        responsableConMasPicking: topWorker
           ? {
-              responsableId: topWorker[0]._id,
-              totalPedidos: topWorker[0].totalPedidos,
-              totalCajas: topWorker[0].totalCajas,
+              responsableId: topWorker.responsableId,
+              totalPedidos: topWorker.totalPedidos,
+              totalCajas: topWorker.totalCajas,
+              pedidoShare: topWorker.pedidoShare,
+              cajasShare: topWorker.cajasShare,
+              cajasPorPedido: topWorker.cajasPorPedido,
+              relacionPedidosCajas: topWorker.relacionPedidosCajas,
             }
           : null,
         responsableConMasErrores: errorRanking[0]
@@ -215,12 +249,7 @@ async function getPickingSummary(req, res) {
             }
           : null,
       },
-      ranking: ranking.map((item) => ({
-        responsableId: item._id,
-        totalPedidos: item.totalPedidos,
-        totalCajas: item.totalCajas,
-        totalErrores: errorMap.get(item._id) || 0,
-      })),
+      ranking,
       reportes: details,
     });
   } catch (error) {
