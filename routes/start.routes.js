@@ -7,7 +7,7 @@ const { createFuelReport, getDailyFuelConsumptionFromReports } = require('../con
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const { getDispatchPage, getDispatchConfig, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
-const { createPickingReport, listRecentPickingReports, getPickingSummary, getPickingReportById, getPickingReportByOrderNumber, createPickingErrorReport, updatePickingReport, deletePickingReport } = require('../controllers/picking.controllers');
+const { createPickingReport, listRecentPickingReports, getMyDailyPickingSummary, getDailyWarehousePerformance, getPickingSummary, getPickingReportById, getPickingReportByOrderNumber, createPickingErrorReport, updatePickingReport, deletePickingReport } = require('../controllers/picking.controllers');
 const {
   sendTestEmailByAdmin,
   sendReminderEmailByAdmin,
@@ -32,6 +32,17 @@ const requireAdminDeleteKey = (req, res, next) => {
   }
 
   next();
+};
+
+const requireWarehouseOrAdminRole = (req, res, next) => {
+  const role = String(req.user?.role || '').trim().toLowerCase();
+
+  if (role === 'almacenista' || role === 'admin') {
+    next();
+    return;
+  }
+
+  return res.status(403).json({ message: 'Solo almacen o administracion pueden ejecutar esta accion.' });
 };
 
 // Auth routes
@@ -120,6 +131,7 @@ router.get('/picking', (req, res) => {
   res.sendFile(require('path').join(__dirname, '../public/picking.html'));
 });
 router.post('/picking-reports', createPickingReport);
+router.get('/picking-reports/my-daily-summary', requireWarehouseOrAdminRole, getMyDailyPickingSummary);
 router.get('/picking-reports/:id', getPickingReportById);
 router.get('/internal/admin/picking-reports', requireAdminRole, requireAdminDeleteKey, listRecentPickingReports);
 router.patch('/internal/admin/picking-reports/:id', requireAdminRole, requireAdminDeleteKey, updatePickingReport);
@@ -127,6 +139,7 @@ router.delete('/internal/admin/picking-reports/:id', requireAdminRole, requireAd
 router.get('/internal/admin/picking-reports/order/:numeroPedido', requireAdminRole, requireAdminDeleteKey, getPickingReportByOrderNumber);
 router.post('/internal/admin/picking-reports/order/:numeroPedido/errors', requireAdminRole, requireAdminDeleteKey, createPickingErrorReport);
 router.get('/internal/admin/picking-reports/summary', requireAdminRole, requireAdminDeleteKey, getPickingSummary);
+router.get('/internal/admin/picking-reports/daily-performance', requireAdminRole, getDailyWarehousePerformance);
 
 // Despacho logístico
 router.get('/dispatch', getDispatchPage);

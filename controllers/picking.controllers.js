@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const PickingReport = require('../models/pickingReport.model');
 const PickingErrorReport = require('../models/pickingErrorReport.model');
 
+const DAILY_PICKING_TARGET = Math.max(Number(process.env.PICKING_DAILY_TARGET || 25) || 25, 1);
+
 function normalizeResponsibleId(value) {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
 }
@@ -108,6 +110,167 @@ async function listRecentPickingReports(req, res) {
     console.error('Error consultando picking reciente:', error);
     return res.status(500).json({
       message: 'Error consultando pickings recientes.',
+    });
+  }
+}
+
+async function getMyDailyPickingSummary(req, res) {
+  try {
+    const responsableId = resolveResponsibleId(req);
+    const range = parseDateRange({ fecha: req.query?.fecha || new Date().toISOString().slice(0, 10) });
+
+    if (!responsableId) {
+      return res.status(400).json({
+        message: 'Se requiere una sesion valida del almacenista.',
+      });
+    }
+
+    if (!range) {
+      return res.status(400).json({
+        message: 'Debes indicar una fecha valida.',
+      });
+    }
+
+    const matchStage = {
+      responsableId,
+      fechaHoraRegistro: {
+        $gte: range.start,
+        $lte: range.end,
+      },
+    };
+
+    const [totals, reportes] = await Promise.all([
+      PickingReport.aggregate([
+        { $match: matchStage },
+        {
+          $group: {
+            _id: null,
+            totalPedidos: { $sum: 1 },
+            totalCajas: { $sum: '$numeroCajas' },
+          },
+        },
+      ]),
+      PickingReport.find(matchStage)
+        .sort({ fechaHoraRegistro: -1 })
+        .limit(8)
+        .lean(),
+    ]);
+
+    const totalsRow = totals[0] || { totalPedidos: 0, totalCajas: 0 };
+    const totalPedidos = Number(totalsRow.totalPedidos) || 0;
+    const totalCajas = Number(totalsRow.totalCajas) || 0;
+    const faltanPedidos = Math.max(DAILY_PICKING_TARGET - totalPedidos, 0);
+    const isLowPicking = totalPedidos < DAILY_PICKING_TARGET;
+
+    return res.status(200).json({
+      filtro: {
+        fecha: range.start,
+      },
+      resumen: {
+        responsableId,
+        totalPedidos,
+        totalCajas,
+        metaPedidos: DAILY_PICKING_TARGET,
+        faltanPedidos,
+        isLowPicking,
+        estado: isLowPicking ? 'bajo' : 'en-meta',
+      },
+      reportes,
+    });
+  } catch (error) {
+    console.error('Error consultando resumen diario de picking propio:', error);
+    return res.status(500).json({
+      message: 'Error consultando tu resumen diario de picking.',
+    });
+  }
+}
+
+async function getDailyWarehousePerformance(req, res) {
+  try {
+    const range = parseDateRange({ fecha: req.query?.fecha || new Date().toISOString().slice(0, 10) });
+
+    if (!range) {
+      return res.status(400).json({
+        message: 'Debes indicar una fecha valida.',
+      });
+    }
+
+    const matchStage = {
+      fechaHoraRegistro: {
+        $gte: range.start,
+        $lte: range.end,
+      },
+    };
+
+    const [totals, rankingRaw] = await Promise.all([
+      PickingReport.aggregate([
+        { $match: matchStage },
+        {
+          $group: {
+            _id: null,
+            totalPedidos: { $sum: 1 },
+            totalCajas: { $sum: '$numeroCajas' },
+            responsablesActivos: { $addToSet: '$responsableId' },
+          },
+        },
+      ]),
+      PickingReport.aggregate([
+        { $match: matchStage },
+        {
+          $group: {
+            _id: '$responsableId',
+            totalPedidos: { $sum: 1 },
+            totalCajas: { $sum: '$numeroCajas' },
+          },
+        },
+        { $sort: { totalPedidos: -1, totalCajas: -1, _id: 1 } },
+      ]),
+    ]);
+
+    const ranking = rankingRaw.map((item) => {
+      const totalPedidos = Number(item?.totalPedidos) || 0;
+      const totalCajas = Number(item?.totalCajas) || 0;
+      const faltanPedidos = Math.max(DAILY_PICKING_TARGET - totalPedidos, 0);
+
+      return {
+        responsableId: normalizeResponsibleId(item?._id),
+        totalPedidos,
+        totalCajas,
+        faltanPedidos,
+        isLowPicking: totalPedidos < DAILY_PICKING_TARGET,
+      };
+    });
+
+    const totalsRow = totals[0] || { totalPedidos: 0, totalCajas: 0, responsablesActivos: [] };
+    const topResponsables = ranking.slice(0, 5);
+    const bajoMetaResponsables = ranking
+      .filter((worker) => worker.isLowPicking)
+      .sort((leftWorker, rightWorker) => {
+        if (rightWorker.faltanPedidos !== leftWorker.faltanPedidos) {
+          return rightWorker.faltanPedidos - leftWorker.faltanPedidos;
+        }
+
+        return String(leftWorker.responsableId).localeCompare(String(rightWorker.responsableId));
+      });
+
+    return res.status(200).json({
+      filtro: {
+        fecha: range.start,
+      },
+      resumen: {
+        totalPedidos: Number(totalsRow.totalPedidos) || 0,
+        totalCajas: Number(totalsRow.totalCajas) || 0,
+        responsablesActivos: Array.isArray(totalsRow.responsablesActivos) ? totalsRow.responsablesActivos.length : 0,
+        metaPedidosPorAlmacenista: DAILY_PICKING_TARGET,
+        almacenistasBajoMeta: bajoMetaResponsables.length,
+      },
+      topResponsables,
+      bajoMetaResponsables,
+    });
+  } catch (error) {
+    console.error('Error consultando rendimiento diario de almacenistas:', error);
+    return res.status(500).json({
+      message: 'Error consultando el rendimiento diario de almacenistas.',
     });
   }
 }
@@ -447,6 +610,8 @@ async function deletePickingReport(req, res) {
 module.exports = {
   createPickingReport,
   listRecentPickingReports,
+  getMyDailyPickingSummary,
+  getDailyWarehousePerformance,
   getPickingSummary,
   getPickingReportById,
   getPickingReportByOrderNumber,
