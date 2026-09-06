@@ -17,6 +17,7 @@ const USERNAME_COLLATION = { locale: "en", strength: 3 };
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ADMIN_ROLE = "admin";
 const DRIVER_ROLE = "chofer";
+const WAREHOUSE_ROLE = "almacenista";
 const USER_ROLE = "user";
 const ALLOW_PUBLIC_SIGNUP = String(process.env.ALLOW_PUBLIC_SIGNUP || "false") === "true";
 
@@ -42,6 +43,10 @@ const normalizeRole = (value) => {
 
   if (normalizedValue === DRIVER_ROLE) {
     return DRIVER_ROLE;
+  }
+
+  if (normalizedValue === WAREHOUSE_ROLE) {
+    return WAREHOUSE_ROLE;
   }
 
   return USER_ROLE;
@@ -325,8 +330,8 @@ const register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const adminSeedEmails = readAdminSeedEmails();
     const seededAsAdmin = adminSeedEmails.has(email);
-    const finalRole = requesterState.isAdmin && requestedRole === ADMIN_ROLE
-      ? ADMIN_ROLE
+    const finalRole = requesterState.isAdmin
+      ? requestedRole
       : seededAsAdmin
         ? ADMIN_ROLE
         : USER_ROLE;

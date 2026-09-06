@@ -3,6 +3,8 @@ const { sendEmail } = require("../services/sendEmail");
 const { sendWhatsAppNotification, normalizePhoneNumber } = require("../services/sendWhatsApp");
 
 const ADMIN_ROLE = "admin";
+const DRIVER_ROLE = "chofer";
+const WAREHOUSE_ROLE = "almacenista";
 const USER_ROLE = "user";
 
 function normalizeEmail(value) {
@@ -11,7 +13,20 @@ function normalizeEmail(value) {
 
 function normalizeRole(value) {
   const role = String(value || "").trim().toLowerCase();
-  return role === ADMIN_ROLE ? ADMIN_ROLE : USER_ROLE;
+
+  if (role === ADMIN_ROLE) {
+    return ADMIN_ROLE;
+  }
+
+  if (role === DRIVER_ROLE) {
+    return DRIVER_ROLE;
+  }
+
+  if (role === WAREHOUSE_ROLE) {
+    return WAREHOUSE_ROLE;
+  }
+
+  return USER_ROLE;
 }
 
 function parseRecipientEmails(rawEmails) {
