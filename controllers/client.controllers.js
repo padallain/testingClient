@@ -1,9 +1,17 @@
 const Client = require("../models/client.model");
 const ClientLocationReport = require("../models/clientLocationReport.model");
 
+const buildSavedByPayload = (user) => ({
+  id: String(user?.id || user?._id || "").trim(),
+  username: String(user?.username || "").trim(),
+  email: String(user?.email || "").trim().toLowerCase(),
+  role: String(user?.role || "").trim().toLowerCase(),
+});
+
 const registerClient = async (req, res) => {
   try {
     const { id, nombre, latitude, longitude, start, end, sucursal } = req.body;
+    const savedBy = buildSavedByPayload(req.user || req.session?.user || null);
 
     if (!id || !nombre || !latitude || !longitude || !start || !end) {
       return res.status(400).json({ message: 'All fields are required' });
@@ -23,11 +31,15 @@ const registerClient = async (req, res) => {
       sucursal: normalizedSucursal,
       location: { latitude, longitude },
       schedule: { start, end },
+      savedBy,
     });
 
     await newClient.save();
 
-    res.status(201).json({ message: 'Client registered successfully' });
+    res.status(201).json({
+      message: 'Client registered successfully',
+      client: buildClientResponse(newClient.toObject ? newClient.toObject() : newClient),
+    });
   } catch (err) {
     console.log("Error en el registro del cliente:", err);
     res.status(500).json({ message: 'Error registering client' });
@@ -52,6 +64,12 @@ const buildClientResponse = (client) => {
 
   return {
     ...client,
+    savedBy: {
+      id: String(client?.savedBy?.id || "").trim(),
+      username: String(client?.savedBy?.username || "").trim(),
+      email: String(client?.savedBy?.email || "").trim().toLowerCase(),
+      role: String(client?.savedBy?.role || "").trim().toLowerCase(),
+    },
     googleMapsLink: hasValidCoordinates
       ? `https://www.google.com/maps?q=${client.location.latitude},${client.location.longitude}`
       : "",

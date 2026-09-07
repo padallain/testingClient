@@ -14,6 +14,12 @@ const clientSchema = new mongoose.Schema({
     start: { type: String, required: true },
     end: { type: String, required: true },
   },
+  savedBy: {
+    id: { type: String, default: '', trim: true },
+    username: { type: String, default: '', trim: true },
+    email: { type: String, default: '', trim: true, lowercase: true },
+    role: { type: String, default: '', trim: true },
+  },
 });
 
 // Compound unique: same chain ID can exist with different sucursal values.

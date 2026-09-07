@@ -349,6 +349,8 @@ const summarizeDriverAnalytics = (routes, issueSummaryByDriver = new Map()) => {
     const driverName = String(route?.driverName || "").trim();
     const stops = Array.isArray(route?.stops) ? route.stops : [];
     const missingClients = Array.isArray(route?.missingClients) ? route.missingClients : [];
+    const unmarkedStops = stops.filter((stop) => !stop?.dispatched);
+    const unresolvedMissingClients = missingClients.filter((item) => !item?.resolved);
     const dispatchedCount = stops.filter((stop) => stop?.dispatched).length;
     const resolvedMissingCount = missingClients.filter((item) => item?.resolved).length;
     const assignedUnits = stops.length + missingClients.length;
@@ -369,6 +371,10 @@ const summarizeDriverAnalytics = (routes, issueSummaryByDriver = new Map()) => {
       totalDistanceKm: 0,
       assignedUnits: 0,
       completedUnits: 0,
+      unmarkedStopsCount: 0,
+      unresolvedMissingClientsCount: 0,
+      unmarkedStops: [],
+      unresolvedMissingClients: [],
       lastRouteAt: null,
     };
 
@@ -383,6 +389,20 @@ const summarizeDriverAnalytics = (routes, issueSummaryByDriver = new Map()) => {
     currentDriver.totalDistanceKm += Number(route?.totalDistanceKm) || 0;
     currentDriver.assignedUnits += assignedUnits;
     currentDriver.completedUnits += completedUnits;
+    currentDriver.unmarkedStopsCount += unmarkedStops.length;
+    currentDriver.unresolvedMissingClientsCount += unresolvedMissingClients.length;
+    currentDriver.unmarkedStops.push(...unmarkedStops.map((stop) => ({
+      routeId: String(route?._id || ""),
+      routeLabel: String(route?.routeLabel || "Ruta sin nombre"),
+      clientId: String(stop?.clientId || ""),
+      clientName: String(stop?.nombre || stop?.clientId || ""),
+    })));
+    currentDriver.unresolvedMissingClients.push(...unresolvedMissingClients.map((client) => ({
+      routeId: String(route?._id || ""),
+      routeLabel: String(route?.routeLabel || "Ruta sin nombre"),
+      clientId: String(client?.clientId || ""),
+      weight: Number(client?.weight) || 0,
+    })));
 
     const routeDate = route?.updatedAt || route?.createdAt || null;
 
@@ -418,6 +438,7 @@ const summarizeDriverAnalytics = (routes, issueSummaryByDriver = new Map()) => {
         ...driver,
         totalKg: Number(driver.totalKg.toFixed(2)),
         totalDistanceKm: Number(driver.totalDistanceKm.toFixed(2)),
+        clientsNotMarkedCount: driver.unmarkedStopsCount + driver.unresolvedMissingClientsCount,
         completionRate: driver.routeCount > 0
           ? Math.round((driver.completedRoutes / driver.routeCount) * 100)
           : 0,
@@ -440,6 +461,12 @@ const summarizeDriverAnalytics = (routes, issueSummaryByDriver = new Map()) => {
         issueRatePer100Clients,
         repeatIssueClientRate,
         highNoveltyIndicator,
+        unmarkedStops: driver.unmarkedStops
+          .sort((leftStop, rightStop) => String(leftStop.routeLabel).localeCompare(String(rightStop.routeLabel)))
+          .slice(0, 8),
+        unresolvedMissingClients: driver.unresolvedMissingClients
+          .sort((leftClient, rightClient) => String(leftClient.routeLabel).localeCompare(String(rightClient.routeLabel)))
+          .slice(0, 8),
       };
     })
     .sort((currentDriver, nextDriver) => {
@@ -464,12 +491,16 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
     pendingCount: accumulator.pendingCount + driver.pendingCount,
     assignedUnits: accumulator.assignedUnits + driver.assignedUnits,
     completedUnits: accumulator.completedUnits + driver.completedUnits,
+    unmarkedStopsCount: accumulator.unmarkedStopsCount + (driver.unmarkedStopsCount || 0),
+    unresolvedMissingClientsCount: accumulator.unresolvedMissingClientsCount + (driver.unresolvedMissingClientsCount || 0),
     totalIssueReports: accumulator.totalIssueReports + (driver.issueReportCount || 0),
     totalIssueItems: accumulator.totalIssueItems + (driver.issueItemCount || 0),
     issueRatePer100Clients: accumulator.issueRatePer100Clients + (driver.issueRatePer100Clients || 0),
     repeatIssueClientsCount: accumulator.repeatIssueClientsCount + (driver.repeatIssueClientsCount || 0),
     clientsWithIssuesCount: accumulator.clientsWithIssuesCount + (driver.clientsWithIssuesCount || 0),
     highNoveltyDrivers: accumulator.highNoveltyDrivers + (driver.highNoveltyIndicator ? 1 : 0),
+    driversWithUnmarkedClients: accumulator.driversWithUnmarkedClients + ((driver.unmarkedStopsCount || 0) > 0 ? 1 : 0),
+    driversWithUnresolvedMissingClients: accumulator.driversWithUnresolvedMissingClients + ((driver.unresolvedMissingClientsCount || 0) > 0 ? 1 : 0),
   }), {
     totalKg: 0,
     totalClients: 0,
@@ -478,12 +509,16 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
     pendingCount: 0,
     assignedUnits: 0,
     completedUnits: 0,
+    unmarkedStopsCount: 0,
+    unresolvedMissingClientsCount: 0,
     totalIssueReports: 0,
     totalIssueItems: 0,
     issueRatePer100Clients: 0,
     repeatIssueClientsCount: 0,
     clientsWithIssuesCount: 0,
     highNoveltyDrivers: 0,
+    driversWithUnmarkedClients: 0,
+    driversWithUnresolvedMissingClients: 0,
   });
 
   return {
@@ -500,6 +535,10 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
       ? Math.round((totals.completedUnits / totals.assignedUnits) * 100)
       : 0,
     pendingCount: totals.pendingCount,
+    unmarkedStopsCount: totals.unmarkedStopsCount,
+    unresolvedMissingClientsCount: totals.unresolvedMissingClientsCount,
+    driversWithUnmarkedClients: totals.driversWithUnmarkedClients,
+    driversWithUnresolvedMissingClients: totals.driversWithUnresolvedMissingClients,
     avgKgPerDriver: driverAnalytics.length > 0
       ? Number((totals.totalKg / driverAnalytics.length).toFixed(2))
       : 0,
