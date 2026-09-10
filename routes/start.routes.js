@@ -1,7 +1,7 @@
 const express = require('express');
 const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, listUsersForAdmin, listReporterUsersForAdmin, approveUserByAdmin, updateUserRoleByAdmin, updateUserPasswordByAdmin, authMiddleware, requireAdminRole } = require('../controllers/auth.controllers');
 const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, addStopToDriverRoute, removeStopFromDriverRoute, reoptimizeDriverRoute, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
-const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport } = require('../controllers/client.controllers');
+const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport, cleanupDuplicateMainBranches } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, getDailyFuelConsumption, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const { createFuelReport, getDailyFuelConsumptionFromReports } = require('../controllers/fuelReport.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
@@ -78,6 +78,7 @@ router.post('/registerClient', registerClient);
 router.get('/countClients', countClients);
 router.get('/getClient/:id', getClient);
 router.get('/getClient/:id/sedes', getClientBranches);
+router.post('/internal/admin/clients/cleanup-duplicate-branches', requireAdminRole, requireAdminDeleteKey, cleanupDuplicateMainBranches);
 router.post('/clientLocationReports', createClientLocationReport);
 router.get('/clientLocationReports', listClientLocationReports);
 router.get('/internal/admin/clientLocationReports', requireAdminRole, requireAdminDeleteKey, listClientLocationReports);

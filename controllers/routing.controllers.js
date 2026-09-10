@@ -439,6 +439,15 @@ const summarizeDriverAnalytics = (routes, issueSummaryByDriver = new Map()) => {
         totalKg: Number(driver.totalKg.toFixed(2)),
         totalDistanceKm: Number(driver.totalDistanceKm.toFixed(2)),
         clientsNotMarkedCount: driver.unmarkedStopsCount + driver.unresolvedMissingClientsCount,
+        assignedRouteClientsCount: driver.dispatchedCount + driver.unmarkedStopsCount,
+        markedRouteClientsCount: driver.dispatchedCount,
+        markedClientRate: (driver.dispatchedCount + driver.unmarkedStopsCount) > 0
+          ? Math.round((driver.dispatchedCount / (driver.dispatchedCount + driver.unmarkedStopsCount)) * 100)
+          : 100,
+        missingClientsAssignedCount: driver.resolvedMissingCount + driver.unresolvedMissingClientsCount,
+        clientSaveRate: (driver.resolvedMissingCount + driver.unresolvedMissingClientsCount) > 0
+          ? Math.round((driver.resolvedMissingCount / (driver.resolvedMissingCount + driver.unresolvedMissingClientsCount)) * 100)
+          : 100,
         completionRate: driver.routeCount > 0
           ? Math.round((driver.completedRoutes / driver.routeCount) * 100)
           : 0,
@@ -521,6 +530,25 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
     driversWithUnresolvedMissingClients: 0,
   });
 
+  const driversWithAssignedStops = driverAnalytics.filter((driver) => (driver.assignedRouteClientsCount || 0) > 0);
+  const lowestMarkedDriver = driversWithAssignedStops.length > 0
+    ? [...driversWithAssignedStops].sort((leftDriver, rightDriver) => {
+        if ((leftDriver.markedClientRate || 0) !== (rightDriver.markedClientRate || 0)) {
+          return (leftDriver.markedClientRate || 0) - (rightDriver.markedClientRate || 0);
+        }
+
+        if ((rightDriver.unmarkedStopsCount || 0) !== (leftDriver.unmarkedStopsCount || 0)) {
+          return (rightDriver.unmarkedStopsCount || 0) - (leftDriver.unmarkedStopsCount || 0);
+        }
+
+        if ((leftDriver.markedRouteClientsCount || 0) !== (rightDriver.markedRouteClientsCount || 0)) {
+          return (leftDriver.markedRouteClientsCount || 0) - (rightDriver.markedRouteClientsCount || 0);
+        }
+
+        return String(leftDriver.driverName || leftDriver.driverId).localeCompare(String(rightDriver.driverName || rightDriver.driverId));
+      })[0]
+    : null;
+
   return {
     drivers: driverAnalytics.length,
     routes: totalRoutes,
@@ -539,6 +567,16 @@ const buildAnalyticsOverview = (driverAnalytics, totalRoutes) => {
     unresolvedMissingClientsCount: totals.unresolvedMissingClientsCount,
     driversWithUnmarkedClients: totals.driversWithUnmarkedClients,
     driversWithUnresolvedMissingClients: totals.driversWithUnresolvedMissingClients,
+    lowestMarkedDriver: lowestMarkedDriver
+      ? {
+          driverId: lowestMarkedDriver.driverId,
+          driverName: lowestMarkedDriver.driverName,
+          markedRouteClientsCount: lowestMarkedDriver.markedRouteClientsCount,
+          unmarkedStopsCount: lowestMarkedDriver.unmarkedStopsCount,
+          assignedRouteClientsCount: lowestMarkedDriver.assignedRouteClientsCount,
+          markedClientRate: lowestMarkedDriver.markedClientRate,
+        }
+      : null,
     avgKgPerDriver: driverAnalytics.length > 0
       ? Number((totals.totalKg / driverAnalytics.length).toFixed(2))
       : 0,

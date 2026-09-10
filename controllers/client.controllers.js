@@ -1,12 +1,78 @@
 const Client = require("../models/client.model");
 const ClientLocationReport = require("../models/clientLocationReport.model");
 
+const normalizeClientName = (value) => String(value ?? "").trim();
+
+const normalizeBranchKey = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized || ["principal", "sede principal", "sede", "main", "branch"].includes(normalized)) {
+    return "principal";
+  }
+
+  return normalized;
+};
+
 const buildSavedByPayload = (user) => ({
   id: String(user?.id || user?._id || "").trim(),
   username: String(user?.username || "").trim(),
   email: String(user?.email || "").trim().toLowerCase(),
   role: String(user?.role || "").trim().toLowerCase(),
 });
+
+const cleanupDuplicateMainBranches = async (req, res) => {
+  try {
+    const duplicates = await Client.aggregate([
+      {
+        $group: {
+          _id: "$id",
+          total: { $sum: 1 },
+          records: { $push: { _id: "$_id", nombre: "$nombre", sucursal: "$sucursal" } },
+        },
+      },
+      {
+        $match: {
+          total: { $gt: 1 },
+        },
+      },
+    ]);
+
+    let removedCount = 0;
+
+    for (const group of duplicates) {
+      const records = group.records || [];
+      const seen = new Map();
+
+      for (const record of records) {
+        const normalizedName = normalizeClientName(record.nombre).toLowerCase();
+        const normalizedBranch = normalizeBranchKey(record.sucursal);
+        const dedupeKey = `${normalizedBranch}|${normalizedName}`;
+
+        if (!seen.has(dedupeKey)) {
+          seen.set(dedupeKey, record);
+          continue;
+        }
+
+        await Client.deleteOne({ _id: record._id });
+        removedCount += 1;
+      }
+    }
+
+    if (res) {
+      return res.status(200).json({
+        message: "Duplicate client branches cleaned up successfully",
+        removedCount,
+      });
+    }
+
+    return { removedCount };
+  } catch (err) {
+    console.log("Error limpiando clientes duplicados:", err);
+    if (res) {
+      return res.status(500).json({ message: "Error cleaning duplicate clients" });
+    }
+    return { removedCount: 0, error: err.message };
+  }
+};
 
 const registerClient = async (req, res) => {
   try {
@@ -17,17 +83,36 @@ const registerClient = async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
+    const normalizedId = String(id).trim();
+    const normalizedNombre = normalizeClientName(nombre);
     const normalizedSucursal = typeof sucursal === 'string' ? sucursal.trim() : '';
+    const existingClients = await Client.find({ id: normalizedId }).lean();
 
-    const existingClient = await Client.findOne({ id, sucursal: normalizedSucursal });
-    if (existingClient) {
+    const duplicateMainBranch = existingClients.find((client) => {
+      const currentSucursal = normalizeBranchKey(client?.sucursal);
+      const currentName = normalizeClientName(client?.nombre).toLowerCase();
+      const incomingBranch = normalizeBranchKey(normalizedSucursal);
+      const incomingName = normalizedNombre.toLowerCase();
+
+      return currentSucursal === incomingBranch && currentName === incomingName;
+    });
+
+    if (duplicateMainBranch) {
+      await Client.deleteOne({ _id: duplicateMainBranch._id });
+      return res.status(409).json({
+        message: 'Duplicate client branch detected and removed. Please use a different branch name or keep only one main branch.',
+      });
+    }
+
+    const exactMatch = await Client.findOne({ id: normalizedId, sucursal: normalizedSucursal });
+    if (exactMatch) {
       const label = normalizedSucursal ? `(${normalizedSucursal})` : '';
       return res.status(400).json({ message: `Client with this ID ${label} already exists`.trim() });
     }
 
     const newClient = new Client({
-      id,
-      nombre,
+      id: normalizedId,
+      nombre: normalizedNombre,
       sucursal: normalizedSucursal,
       location: { latitude, longitude },
       schedule: { start, end },
@@ -241,6 +326,7 @@ const deleteClientLocationReport = async (req, res) => {
 
 module.exports = {
   registerClient,
+  cleanupDuplicateMainBranches,
   countClients,
   getClient,
   getClientBranches,
