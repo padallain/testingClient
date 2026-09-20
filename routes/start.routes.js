@@ -3,7 +3,14 @@ const { register, login, getSession, logout, requestPasswordResetCode, verifyPas
 const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, addStopToDriverRoute, removeStopFromDriverRoute, reoptimizeDriverRoute, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport, cleanupDuplicateMainBranches } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, getDailyFuelConsumption, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
-const { createFuelReport, getDailyFuelConsumptionFromReports } = require('../controllers/fuelReport.controllers');
+const {
+  createFuelReport,
+  getDailyFuelConsumptionFromReports,
+  getFuelSecurityOverview,
+  getFuelConsumptionByPlaca,
+  listPendingFuelPhotoDeletion,
+  approveFuelPhotoDeletion,
+} = require('../controllers/fuelReport.controllers');
 const { createVehicleMaintenance, listRecentVehicleMaintenance, listUpcomingVehicleMaintenance, getVehicleMaintenanceById, getVehicleMaintenanceByPlaca, updateVehicleMaintenance, deleteVehicleMaintenance } = require('../controllers/vehicleMaintenance.controllers');
 const { getDispatchPage, getDispatchConfig, calculateDispatch } = require('../controllers/dispatch.controllers');
 const { getDespachoPage } = require('../controllers/despacho.controllers');
@@ -115,6 +122,11 @@ router.get('/dailyCheck', getRecentDailyChecks);
 router.get('/fuel-consumption/daily', getDailyFuelConsumption);
 router.post('/fuel-reports', createFuelReport);
 router.get('/fuel-reports/daily-summary', getDailyFuelConsumptionFromReports);
+router.get('/fuel-reports/consumption-by-placa', getFuelConsumptionByPlaca);
+router.get('/internal/admin/fuel-reports/security-overview', requireAdminRole, requireAdminDeleteKey, getFuelSecurityOverview);
+router.get('/internal/admin/fuel-reports/pending-photo-deletion', requireAdminRole, requireAdminDeleteKey, listPendingFuelPhotoDeletion);
+router.post('/internal/admin/fuel-reports/approve-photo-deletion', requireAdminRole, requireAdminDeleteKey, approveFuelPhotoDeletion);
+router.get('/internal/admin/fuel-reports/consumption-by-placa', requireAdminRole, requireAdminDeleteKey, getFuelConsumptionByPlaca);
 router.get('/dailyCheck/placa/:placa', getDailyChecksByPlaca);
 router.get('/dailyCheck/:id', getDailyCheckById);
 router.patch('/internal/admin/dailyCheck/:id', requireAdminRole, requireAdminDeleteKey, updateDailyCheck);
