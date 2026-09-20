@@ -608,5 +608,8 @@ const getFuelSecurityOverview = async (req, res) => {
 module.exports = {
   createFuelReport,
   getDailyFuelConsumptionFromReports,
+  getFuelConsumptionByPlaca,
   getFuelSecurityOverview,
+  listPendingFuelPhotoDeletion,
+  approveFuelPhotoDeletion,
 };
