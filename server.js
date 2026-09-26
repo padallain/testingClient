@@ -7,6 +7,7 @@ const morgan = require("morgan");
 const cors = require("cors");
 const { connectToDatabase } = require("./db"); // Importa la función de conexión
 const startRoutes = require("./routes/start.routes");
+const { startDailyCheckReminderScheduler } = require("./services/dailyCheckReminderService");
 
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
@@ -141,6 +142,7 @@ const PORT = process.env.PORT || 3000;
 connectToDatabase()
   .then(() => {
     console.log('Connected to MongoDB');
+    startDailyCheckReminderScheduler();
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });

@@ -21,6 +21,7 @@ const {
   sendTestWhatsAppByAdmin,
   sendReminderWhatsAppByAdmin,
 } = require('../controllers/notifications.controllers');
+const { sendMissingDailyCheckReminderEmail } = require('../services/dailyCheckReminderService');
 const despachoRoutes = require('./despacho.routes');
 const router = express.Router();
 
@@ -77,6 +78,18 @@ router.patch('/internal/admin/users/:userId/password', requireAdminRole, updateU
 router.post('/internal/admin/users', requireAdminRole, register);
 router.post('/internal/admin/notifications/email-test', requireAdminRole, sendTestEmailByAdmin);
 router.post('/internal/admin/notifications/reminder-email', requireAdminRole, sendReminderEmailByAdmin);
+router.post('/internal/admin/notifications/daily-check-reminder', requireAdminRole, async (req, res) => {
+  try {
+    const result = await sendMissingDailyCheckReminderEmail();
+    return res.status(200).json({
+      message: result.sent ? 'Recordatorio enviado a administradores.' : 'No hubo choferes pendientes para notificar.',
+      result,
+    });
+  } catch (error) {
+    console.error('[daily-check-reminder] Manual trigger failed:', error);
+    return res.status(500).json({ message: 'No se pudo ejecutar el recordatorio manual.' });
+  }
+});
 router.post('/internal/admin/notifications/whatsapp-test', requireAdminRole, sendTestWhatsAppByAdmin);
 router.post('/internal/admin/notifications/reminder-whatsapp', requireAdminRole, sendReminderWhatsAppByAdmin);
 
