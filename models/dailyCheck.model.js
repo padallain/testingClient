@@ -15,6 +15,8 @@ const dailyCheckSchema = new mongoose.Schema(
     placa: { type: String, required: true, trim: true },
     modelo: { type: String, required: true, trim: true },
     anio: { type: Number, required: true },
+    personalTrabajo: { type: String, default: "", trim: true },
+    destino: { type: String, default: "", trim: true },
     fechaHoraRegistro: { type: Date, default: Date.now, immutable: true },
     checklist: {
       type: [checklistItemSchema],

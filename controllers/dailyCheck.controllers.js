@@ -120,7 +120,7 @@ const getRecentDailyChecks = async (req, res) => {
 
 const createDailyCheck = async (req, res) => {
 	try {
-		const { placa, modelo, anio, checklist, observaciones } = req.body;
+		const { placa, modelo, anio, checklist, observaciones, personalTrabajo, destino } = req.body;
 		const chofer = resolveDriverName(req);
 		const normalizedFuelLoad = normalizeFuelLoad(req.body?.fuelLoad || {});
 
@@ -157,6 +157,8 @@ const createDailyCheck = async (req, res) => {
 			placa: normalizePlaca(placa),
 			modelo: modelo.trim(),
 			anio: Number(anio),
+			personalTrabajo: typeof personalTrabajo === "string" ? personalTrabajo.trim() : "",
+			destino: typeof destino === "string" ? destino.trim() : "",
 			checklist: normalizedChecklist,
 			fuelLoad: normalizedFuelLoad,
 			observaciones: typeof observaciones === "string" ? observaciones.trim() : "",

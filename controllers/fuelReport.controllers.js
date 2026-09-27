@@ -9,7 +9,6 @@ const DUPLICATE_WINDOW_MINUTES = Number(process.env.FUEL_DUPLICATE_WINDOW_MINUTE
 const MAX_KM_BETWEEN_REFILLS = Number(process.env.FUEL_MAX_KM_BETWEEN_REFILLS || 800);
 const MIN_PRICE_PER_LITER = Number(process.env.FUEL_MIN_PRICE_PER_LITER || 0.1);
 const MAX_PRICE_PER_LITER = Number(process.env.FUEL_MAX_PRICE_PER_LITER || 5);
-const MAX_RECEIPT_IMAGE_KB = Number(process.env.FUEL_MAX_RECEIPT_IMAGE_KB || 1024);
 const FUEL_PHOTO_RETENTION_DAYS = Number(process.env.FUEL_PHOTO_RETENTION_DAYS || 7);
 
 const resolveRole = (req) => String(req.user?.role || req.session?.user?.role || "").trim().toLowerCase();
@@ -44,37 +43,6 @@ const markExpiredFuelPhotoReportsForDeletion = async () => {
   );
 
   return Number(result?.modifiedCount || 0);
-};
-
-const parseReceiptPhotoDataUrl = (value) => {
-  const normalized = normalizeText(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const match = normalized.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/);
-  if (!match) {
-    return { error: "La foto del comprobante debe ser una imagen valida en formato base64." };
-  }
-
-  const mimeType = match[1].toLowerCase();
-  const base64Payload = match[2];
-  const estimatedBytes = Math.floor((base64Payload.length * 3) / 4);
-  const sizeKb = Math.round((estimatedBytes / 1024) * 100) / 100;
-
-  if (!["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mimeType)) {
-    return { error: "La foto del comprobante debe ser JPG, PNG o WEBP." };
-  }
-
-  if (sizeKb > MAX_RECEIPT_IMAGE_KB) {
-    return { error: `La foto del comprobante supera el maximo permitido (${MAX_RECEIPT_IMAGE_KB} KB).` };
-  }
-
-  return {
-    dataUrl: normalized,
-    mimeType,
-    sizeKb,
-  };
 };
 
 const resolveDriverName = (req) => {
@@ -134,7 +102,6 @@ const createFuelReport = async (req, res) => {
     const station = normalizeText(req.body?.station);
     const notes = normalizeText(req.body?.notes);
     const receiptNumber = normalizeReceiptNumber(req.body?.receiptNumber);
-    const receiptPhotoParsed = parseReceiptPhotoDataUrl(req.body?.receiptPhotoDataUrl);
     const reportedAt = new Date();
 
     if (!chofer || !placa) {
@@ -171,14 +138,6 @@ const createFuelReport = async (req, res) => {
 
     if (!/^[A-Z0-9\-_/]+$/.test(receiptNumber)) {
       return res.status(400).json({ message: "El numero de comprobante solo puede usar letras, numeros y - _ /." });
-    }
-
-    if (!receiptPhotoParsed) {
-      return res.status(400).json({ message: "La foto del comprobante es obligatoria." });
-    }
-
-    if (receiptPhotoParsed?.error) {
-      return res.status(400).json({ message: receiptPhotoParsed.error });
     }
 
     const duplicatedReceipt = await FuelReport.findOne({ receiptNumber }).lean();
@@ -267,9 +226,9 @@ const createFuelReport = async (req, res) => {
         userAgent: String(req.get("user-agent") || "").trim(),
       },
       receiptPhoto: {
-        dataUrl: receiptPhotoParsed.dataUrl,
-        mimeType: receiptPhotoParsed.mimeType,
-        sizeKb: receiptPhotoParsed.sizeKb,
+        dataUrl: "",
+        mimeType: "",
+        sizeKb: 0,
         capturedAt: reportedAt,
       },
       photoRetention: {
