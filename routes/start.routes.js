@@ -53,6 +53,21 @@ const requireWarehouseOrAdminRole = (req, res, next) => {
   return res.status(403).json({ message: 'Solo almacen o administracion pueden ejecutar esta accion.' });
 };
 
+const requireCronKey = (req, res, next) => {
+  const configuredKey = process.env.CRON_SECRET_KEY || process.env.ADMIN_DELETE_KEY || 'cron-secret-key';
+  const providedKey = req.headers['x-cron-key'] || req.query.key;
+
+  if (!configuredKey) {
+    return res.status(500).json({ message: 'CRON_SECRET_KEY is not configured' });
+  }
+
+  if (!providedKey || providedKey !== configuredKey) {
+    return res.status(403).json({ message: 'Forbidden: invalid cron secret key.' });
+  }
+
+  next();
+};
+
 // Auth routes
 router.get('/', (req, res) => {
   res.send('You have to log in.');
@@ -81,6 +96,14 @@ router.post('/internal/admin/notifications/reminder-email', requireAdminRole, se
 router.post('/internal/admin/notifications/daily-check-reminder', requireAdminRole, async (req, res) => {
   try {
     const result = await sendMissingDailyCheckReminderEmail();
+
+    if (result.reason === 'db_unavailable') {
+      return res.status(503).json({
+        message: 'No se pudo consultar la base de datos para enviar el reporte diario.',
+        result,
+      });
+    }
+
     return res.status(200).json({
       message: result.sent ? 'Recordatorio enviado a administradores.' : 'No hubo choferes pendientes para notificar.',
       result,
@@ -88,6 +111,46 @@ router.post('/internal/admin/notifications/daily-check-reminder', requireAdminRo
   } catch (error) {
     console.error('[daily-check-reminder] Manual trigger failed:', error);
     return res.status(500).json({ message: 'No se pudo ejecutar el recordatorio manual.' });
+  }
+});
+router.post('/internal/cron/morning-reminder', requireCronKey, async (req, res) => {
+  try {
+    const result = await require('../services/dailyCheckReminderService').sendMorningAdminReminderEmail();
+
+    if (result.reason === 'db_unavailable') {
+      return res.status(503).json({
+        message: 'No se pudo consultar la base de datos para enviar el recordatorio matutino.',
+        result,
+      });
+    }
+
+    return res.status(200).json({
+      message: result.sent ? 'Recordatorio matutino enviado a administradores.' : 'No se envio el recordatorio matutino.',
+      result,
+    });
+  } catch (error) {
+    console.error('[cron/morning-reminder] Cron trigger failed:', error);
+    return res.status(500).json({ message: 'No se pudo ejecutar el recordatorio matutino desde cron.' });
+  }
+});
+router.post('/internal/cron/daily-check-reminder', requireCronKey, async (req, res) => {
+  try {
+    const result = await sendMissingDailyCheckReminderEmail();
+
+    if (result.reason === 'db_unavailable') {
+      return res.status(503).json({
+        message: 'No se pudo consultar la base de datos para enviar el reporte diario.',
+        result,
+      });
+    }
+
+    return res.status(200).json({
+      message: result.sent ? 'Reporte diario enviado a administradores.' : 'No hubo choferes pendientes para notificar.',
+      result,
+    });
+  } catch (error) {
+    console.error('[cron/daily-check-reminder] Cron trigger failed:', error);
+    return res.status(500).json({ message: 'No se pudo ejecutar el reporte diario desde cron.' });
   }
 });
 router.post('/internal/admin/notifications/whatsapp-test', requireAdminRole, sendTestWhatsAppByAdmin);
@@ -104,7 +167,7 @@ router.get('/clientLocationReports', listClientLocationReports);
 router.get('/internal/admin/clientLocationReports', requireAdminRole, requireAdminDeleteKey, listClientLocationReports);
 router.delete('/internal/admin/clientLocationReports/:reportId', requireAdminRole, requireAdminDeleteKey, deleteClientLocationReport);
 router.delete('/internal/admin/deleteClient/:id', requireAdminRole, requireAdminDeleteKey, deleteClient);
-
+ 
 // Rutas de logística
 router.post('/makeRoute', makeRoute);
 router.get('/driver-routes/:driverId/current', getDriverCurrentRoute);

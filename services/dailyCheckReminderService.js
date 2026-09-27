@@ -1,6 +1,21 @@
+const mongoose = require("mongoose");
 const DailyCheck = require("../models/dailyCheck.model");
 const User = require("../models/user.model");
 const { sendEmail } = require("./sendEmail");
+
+function buildDatabaseUnavailableResult(extra = {}) {
+  return {
+    sent: false,
+    reason: "db_unavailable",
+    message: "No se pudo consultar la base de datos para armar el reporte.",
+    error: "Database unavailable",
+    pendingDrivers: [],
+    drivers: [],
+    recipients: [],
+    results: [],
+    ...extra,
+  };
+}
 
 function normalizeDriverLabel(value) {
   return String(value || "").trim().toLowerCase();
@@ -24,6 +39,10 @@ function getTodayDayRange(referenceDate = new Date()) {
 }
 
 async function getAdminRecipients() {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error("DATABASE_UNAVAILABLE");
+  }
+
   const admins = await User.find({
     role: "admin",
     email: { $exists: true, $ne: "" },
@@ -80,6 +99,10 @@ async function getMissingDailyCheckDriversForToday() {
 }
 
 async function getDriversDailyCheckStatusForToday() {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error("DATABASE_UNAVAILABLE");
+  }
+
   const { start, end } = getTodayDayRange();
 
   const [drivers, todaysReports] = await Promise.all([
@@ -128,134 +151,150 @@ async function getDriversDailyCheckStatusForToday() {
 }
 
 async function sendMorningAdminReminderEmail() {
-  const adminRecipients = await getAdminRecipients();
+  try {
+    const adminRecipients = await getAdminRecipients();
 
-  if (!adminRecipients.length) {
-    return {
-      sent: false,
-      reason: "no_admin_recipients",
-    };
-  }
-
-  const subject = "Recordatorio matutino: chequeo diario de operacion";
-  const text = [
-    "Recordatorio MakeRoute",
-    "",
-    "Buenos dias. Hoy se requiere cerrar el chequeo diario de choferes antes del mediodia.",
-    "",
-    "A las 12:00 se enviara el resumen del estado del chequeo diario a los administradores.",
-    "",
-    "Este mensaje fue enviado automaticamente por MakeRoute.",
-  ].join("\n");
-
-  const html = `
-    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
-      <h2 style="margin-bottom: 10px;">Recordatorio matutino MakeRoute</h2>
-      <p>Buenos dias. Hoy se requiere cerrar el chequeo diario de choferes antes del mediodia.</p>
-      <p>A las 12:00 se enviara el resumen del estado del chequeo diario a los administradores.</p>
-      <p style="margin-top: 16px; color: #4b5563; font-size: 12px;">Este mensaje fue enviado automaticamente por MakeRoute.</p>
-    </div>
-  `;
-
-  const results = [];
-
-  for (const recipient of adminRecipients) {
-    try {
-      await sendEmail({ to: recipient, subject, text, html });
-      results.push({ recipient, status: "sent" });
-    } catch (error) {
-      console.error("[dailyCheckReminder] Error sending morning admin email:", error);
-      results.push({ recipient, status: "failed", error: String(error?.message || error) });
+    if (!adminRecipients.length) {
+      return {
+        sent: false,
+        reason: "no_admin_recipients",
+      };
     }
-  }
 
-  return {
-    sent: results.some((result) => result.status === "sent"),
-    recipients: adminRecipients,
-    results,
-  };
+    const subject = "Recordatorio matutino: chequeo diario de operacion";
+    const text = [
+      "Recordatorio MakeRoute",
+      "",
+      "Buenos dias. Hoy se requiere cerrar el chequeo diario de choferes antes del mediodia.",
+      "",
+      "A las 12:00 se enviara el resumen del estado del chequeo diario a los administradores.",
+      "",
+      "Este mensaje fue enviado automaticamente por MakeRoute.",
+    ].join("\n");
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+        <h2 style="margin-bottom: 10px;">Recordatorio matutino MakeRoute</h2>
+        <p>Buenos dias. Hoy se requiere cerrar el chequeo diario de choferes antes del mediodia.</p>
+        <p>A las 12:00 se enviara el resumen del estado del chequeo diario a los administradores.</p>
+        <p style="margin-top: 16px; color: #4b5563; font-size: 12px;">Este mensaje fue enviado automaticamente por MakeRoute.</p>
+      </div>
+    `;
+
+    const results = [];
+
+    for (const recipient of adminRecipients) {
+      try {
+        await sendEmail({ to: recipient, subject, text, html });
+        results.push({ recipient, status: "sent" });
+      } catch (error) {
+        console.error("[dailyCheckReminder] Error sending morning admin email:", error);
+        results.push({ recipient, status: "failed", error: String(error?.message || error) });
+      }
+    }
+
+    return {
+      sent: results.some((result) => result.status === "sent"),
+      recipients: adminRecipients,
+      results,
+    };
+  } catch (error) {
+    console.error("[dailyCheckReminder] Unable to send morning reminder:", error);
+    return buildDatabaseUnavailableResult({
+      message: "No se pudo consultar la base de datos para enviar el recordatorio matutino.",
+      error: String(error?.message || error),
+    });
+  }
 }
 
 async function sendMissingDailyCheckReminderEmail() {
-  const driverStatuses = await getDriversDailyCheckStatusForToday();
-  const missingDrivers = driverStatuses.filter((driver) => driver.status === "pendiente");
+  try {
+    const driverStatuses = await getDriversDailyCheckStatusForToday();
+    const missingDrivers = driverStatuses.filter((driver) => driver.status === "pendiente");
 
-  const adminRecipients = await getAdminRecipients();
+    const adminRecipients = await getAdminRecipients();
 
-  if (!adminRecipients.length) {
-    return {
-      sent: false,
-      reason: "no_admin_recipients",
-      missingDrivers: missingDrivers.map((driver) => driver.displayName),
-      drivers: driverStatuses,
-    };
-  }
-
-  const subject = "Reporte diario: chequeo de camiones";
-  const driverRows = driverStatuses
-    .map((driver) => `${driver.displayName} - ${driver.status === "reporte ok" ? "Reporte OK" : "Pendiente"}`)
-    .join("\n");
-
-  const text = [
-    "Reporte diario MakeRoute",
-    "",
-    `Fecha: ${new Date().toLocaleDateString("es-ES")}`,
-    "",
-    `Choferes con reporte: ${driverStatuses.filter((driver) => driver.status === "reporte ok").length}/${driverStatuses.length}`,
-    "",
-    `Choferes pendientes: ${missingDrivers.length}`,
-    "",
-    missingDrivers.length
-      ? `Pendientes: ${missingDrivers.map((driver) => driver.displayName).join(", ")}`
-      : "Todos los choferes registraron el chequeo diario.",
-    "",
-    "Detalle completo:",
-    driverRows,
-    "",
-    "Este mensaje fue enviado automaticamente por MakeRoute.",
-  ].join("\n");
-
-  const html = `
-    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
-      <h2 style="margin-bottom: 10px;">Reporte diario MakeRoute</h2>
-      <p><strong>Fecha:</strong> ${new Date().toLocaleDateString("es-ES")}</p>
-      <p><strong>Choferes con reporte:</strong> ${driverStatuses.filter((driver) => driver.status === "reporte ok").length}/${driverStatuses.length}</p>
-      <p><strong>Choferes pendientes:</strong> ${missingDrivers.length}</p>
-      <p style="margin: 12px 0 8px;"><strong>Detalle:</strong></p>
-      <ul>
-        ${driverStatuses
-          .map((driver) => `<li>${driver.displayName}: <strong>${driver.status === "reporte ok" ? "Reporte OK" : "Pendiente"}</strong></li>`)
-          .join("")}
-      </ul>
-      <p style="margin-top: 16px; color: #4b5563; font-size: 12px;">Este mensaje fue enviado automaticamente por MakeRoute.</p>
-    </div>
-  `;
-
-  const results = [];
-
-  for (const recipient of adminRecipients) {
-    try {
-      await sendEmail({
-        to: recipient,
-        subject,
-        text,
-        html,
-      });
-
-      results.push({ recipient, status: "sent" });
-    } catch (error) {
-      console.error("[dailyCheckReminder] Error sending daily report email:", error);
-      results.push({ recipient, status: "failed", error: String(error?.message || error) });
+    if (!adminRecipients.length) {
+      return {
+        sent: false,
+        reason: "no_admin_recipients",
+        missingDrivers: missingDrivers.map((driver) => driver.displayName),
+        drivers: driverStatuses,
+      };
     }
-  }
 
-  return {
-    sent: results.some((result) => result.status === "sent"),
-    pendingDrivers: missingDrivers.map((driver) => driver.displayName),
-    drivers: driverStatuses,
-    recipients: adminRecipients,
-    results,
-  };
+    const subject = "Reporte diario: chequeo de camiones";
+    const driverRows = driverStatuses
+      .map((driver) => `${driver.displayName} - ${driver.status === "reporte ok" ? "Reporte OK" : "Pendiente"}`)
+      .join("\n");
+
+    const text = [
+      "Reporte diario MakeRoute",
+      "",
+      `Fecha: ${new Date().toLocaleDateString("es-ES")}`,
+      "",
+      `Choferes con reporte: ${driverStatuses.filter((driver) => driver.status === "reporte ok").length}/${driverStatuses.length}`,
+      "",
+      `Choferes pendientes: ${missingDrivers.length}`,
+      "",
+      missingDrivers.length
+        ? `Pendientes: ${missingDrivers.map((driver) => driver.displayName).join(", ")}`
+        : "Todos los choferes registraron el chequeo diario.",
+      "",
+      "Detalle completo:",
+      driverRows,
+      "",
+      "Este mensaje fue enviado automaticamente por MakeRoute.",
+    ].join("\n");
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+        <h2 style="margin-bottom: 10px;">Reporte diario MakeRoute</h2>
+        <p><strong>Fecha:</strong> ${new Date().toLocaleDateString("es-ES")}</p>
+        <p><strong>Choferes con reporte:</strong> ${driverStatuses.filter((driver) => driver.status === "reporte ok").length}/${driverStatuses.length}</p>
+        <p><strong>Choferes pendientes:</strong> ${missingDrivers.length}</p>
+        <p style="margin: 12px 0 8px;"><strong>Detalle:</strong></p>
+        <ul>
+          ${driverStatuses
+            .map((driver) => `<li>${driver.displayName}: <strong>${driver.status === "reporte ok" ? "Reporte OK" : "Pendiente"}</strong></li>`)
+            .join("")}
+        </ul>
+        <p style="margin-top: 16px; color: #4b5563; font-size: 12px;">Este mensaje fue enviado automaticamente por MakeRoute.</p>
+      </div>
+    `;
+
+    const results = [];
+
+    for (const recipient of adminRecipients) {
+      try {
+        await sendEmail({
+          to: recipient,
+          subject,
+          text,
+          html,
+        });
+
+        results.push({ recipient, status: "sent" });
+      } catch (error) {
+        console.error("[dailyCheckReminder] Error sending daily report email:", error);
+        results.push({ recipient, status: "failed", error: String(error?.message || error) });
+      }
+    }
+
+    return {
+      sent: results.some((result) => result.status === "sent"),
+      pendingDrivers: missingDrivers.map((driver) => driver.displayName),
+      drivers: driverStatuses,
+      recipients: adminRecipients,
+      results,
+    };
+  } catch (error) {
+    console.error("[dailyCheckReminder] Unable to build daily report:", error);
+    return buildDatabaseUnavailableResult({
+      message: "No se pudo consultar la base de datos para enviar el reporte diario.",
+      error: String(error?.message || error),
+    });
+  }
 }
 
 let reminderScheduler = null;
