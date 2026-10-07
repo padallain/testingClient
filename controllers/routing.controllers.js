@@ -3,6 +3,7 @@ const RouteAssignment = require("../models/routeAssignment.model");
 const TransportTrip = require("../models/transportTrip.model");
 const { normalizeLoadGuide } = require("../services/loadGuideService");
 const { loadDispatchCompanies } = require("../services/dispatchCompany.service");
+const { routeStopIdentity, normalizeRouteStops, normalizeDriverRoute } = require('../services/routeStopIdentity.service');
 const DispatchIssueReport = require("../models/dispatchIssueReport.model");
 const {
   buildMissingClients,
@@ -24,10 +25,11 @@ const {
   calculateRouteStatus,
 } = require("../services/routeStatus.service");
 
-const routeStopKey = stop => JSON.stringify([String(stop?.clientId || stop?.id || '').trim(), String(stop?.sucursal || '').trim()]);
+const routeStopKey = routeStopIdentity;
 const resolveRouteStopKey = (stops, rawStop) => {
-  if (Object.prototype.hasOwnProperty.call(rawStop, 'sucursal')) return routeStopKey(rawStop);
-  const matches = [...stops].filter(([, stop]) => stop.clientId === rawStop.clientId);
+  if (rawStop.stopKey && stops.has(rawStop.stopKey)) return rawStop.stopKey;
+  const matches = [...stops].filter(([, stop]) => stop.clientId === rawStop.clientId
+    && (!Object.prototype.hasOwnProperty.call(rawStop, 'sucursal') || (stop.sucursal || '') === (rawStop.sucursal || '')));
   return matches.length === 1 ? matches[0][0] : null;
 };
 
@@ -60,7 +62,8 @@ async function orderStopsFromPriority(stops, priority, recalculate = false) {
   const anchor = byKey.get(key);
   if (!anchor) { const error = new Error('La sede prioritaria no pertenece a la ruta.'); error.statusCode = 400; throw error; }
   if (!recalculate && routeStopKey(stops[0]) === key) return stops;
-  const options = await buildRouteOptions(mapStopsForArtifacts(stops), {
+  const orderedFromAnchor = [anchor, ...stops.filter(stop => routeStopKey(stop) !== key)];
+  const options = await buildRouteOptions(mapStopsForArtifacts(orderedFromAnchor), {
     anchorClientId: anchor.clientId, anchorSucursal: anchor.sucursal || '',
     anchorStopKey: anchor.sucursal ? `${anchor.clientId}|${anchor.sucursal}` : anchor.clientId,
   });
@@ -93,9 +96,7 @@ const mergeStopProgress = (stops, progressSourceStops) => {
 };
 
 const buildRecommendedStopsFromAssignment = async (assignment) => {
-  const currentStops = Array.isArray(assignment?.stops)
-    ? assignment.stops.map((stop) => (stop.toObject ? stop.toObject() : stop))
-    : [];
+  const currentStops = normalizeRouteStops(assignment?.stops, assignment?.loadGuide?.orders);
 
   if (currentStops.length === 0) {
     return [];
@@ -132,6 +133,7 @@ const buildRecommendedStopsFromAssignment = async (assignment) => {
 };
 
 const applyRouteArtifactsToAssignment = async (assignment, stops) => {
+  stops = normalizeRouteStops(stops, assignment.loadGuide?.orders);
   const normalizedStops = mapStopsForArtifacts(stops);
   const { googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(normalizedStops);
   const totalDistanceKm = await calculateRouteDistance(normalizedStops);
@@ -951,8 +953,8 @@ const getDriverCurrentRoute = async (req, res) => {
     }
 
     res.status(200).json({
-      route: latestRoute,
-      routes: activeRoutes.length > 0 ? activeRoutes : [latestRoute],
+      route: normalizeDriverRoute(latestRoute),
+      routes: (activeRoutes.length > 0 ? activeRoutes : [latestRoute]).map(normalizeDriverRoute),
     });
   } catch (err) {
     console.log("Error obteniendo ruta del chofer:", err);
@@ -987,8 +989,8 @@ const getDriverRouteById = async (req, res) => {
       : [selectedRoute, ...activeRoutes];
 
     res.status(200).json({
-      route: selectedRoute,
-      routes,
+      route: normalizeDriverRoute(selectedRoute),
+      routes: routes.map(normalizeDriverRoute),
     });
   } catch (err) {
     console.log("Error obteniendo ruta por ID:", err);
@@ -1265,7 +1267,9 @@ const updateStopDispatchStatus = async (req, res) => {
       return res.status(404).json({ message: "Route not found" });
     }
 
+    assignment.stops = normalizeRouteStops(assignment.stops, assignment.loadGuide?.orders);
     const matches = assignment.stops.filter(item => item.clientId === clientId
+      && (!req.body.stopKey || routeStopKey(item) === req.body.stopKey)
       && (!Object.prototype.hasOwnProperty.call(req.body || {}, 'sucursal') || (item.sucursal || '') === String(req.body.sucursal || '').trim()));
     if (matches.length > 1) return res.status(409).json({ message: 'Selecciona la sede del cliente que quieres marcar.' });
     const stop = matches[0];
@@ -1313,9 +1317,7 @@ const addStopToDriverRoute = async (req, res) => {
       return res.status(404).json({ message: "Route not found" });
     }
 
-    const currentStops = Array.isArray(assignment.stops)
-      ? assignment.stops.map((stop) => (stop?.toObject ? stop.toObject() : stop))
-      : [];
+    const currentStops = normalizeRouteStops(assignment.stops, assignment.loadGuide?.orders);
 
     const clientQuery = hasSucursalField
       ? { id: normalizedClientId, sucursal: normalizedSucursal }
@@ -1352,7 +1354,8 @@ const addStopToDriverRoute = async (req, res) => {
     }
 
     const selectedClient = matchedClients[0];
-    const selectedKey = routeStopKey({ clientId: normalizedClientId, sucursal: selectedClient.sucursal || '' });
+    const selectedKey = routeStopKey({ clientId: normalizedClientId, sucursal: selectedClient.sucursal || '',
+      nombre: selectedClient.nombre, location: selectedClient.location });
     const branchOptions = [...new Set((assignment.loadGuide?.orders || []).filter(order => order.clientId === normalizedClientId).map(order => String(order.sucursal || '')))];
     if (branchOptions.length === 1 && currentStops.filter(stop => stop.clientId === normalizedClientId).length === 1) {
       const oldStop = currentStops.find(stop => stop.clientId === normalizedClientId);
@@ -1360,7 +1363,8 @@ const addStopToDriverRoute = async (req, res) => {
     }
     if (currentStops.some(stop => {
       const branch = stop.sucursal || (branchOptions.length === 1 && currentStops.filter(item => item.clientId === normalizedClientId).length === 1 ? branchOptions[0] : '');
-      return routeStopKey({ clientId: stop.clientId, sucursal: branch }) === selectedKey;
+      return branch && branch === String(selectedClient.sucursal || '') && stop.clientId === normalizedClientId
+        || routeStopKey({ ...stop, sucursal: branch }) === selectedKey;
     })) return res.status(409).json({ message: 'El cliente y esta sede ya estan incluidos en la ruta.' });
     const hasValidCoordinates = Number.isFinite(Number(selectedClient?.location?.latitude))
       && Number.isFinite(Number(selectedClient?.location?.longitude));
@@ -1431,15 +1435,14 @@ const removeStopFromDriverRoute = async (req, res) => {
       return res.status(404).json({ message: "Route not found" });
     }
 
-    const currentStops = Array.isArray(assignment.stops)
-      ? assignment.stops.map((stop) => (stop?.toObject ? stop.toObject() : stop))
-      : [];
+    const currentStops = normalizeRouteStops(assignment.stops, assignment.loadGuide?.orders);
 
     if (currentStops.length <= 1) {
       return res.status(400).json({ message: "The route must keep at least one client" });
     }
 
     const matches = currentStops.filter(stop => String(stop.clientId || '') === normalizedClientId
+      && (!req.query?.stopKey || routeStopKey(stop) === req.query.stopKey)
       && (!Object.prototype.hasOwnProperty.call(req.query || {}, 'sucursal') || (stop.sucursal || '') === String(req.query.sucursal || '').trim()));
     if (matches.length > 1) return res.status(409).json({ message: 'Selecciona la sede del cliente que quieres quitar.' });
     const stopExists = matches.length === 1;
@@ -1487,7 +1490,7 @@ const customizeDriverRoute = async (req, res) => {
     }
 
     const currentStopsById = new Map(
-      assignment.stops.map((stop) => [routeStopKey(stop), stop.toObject ? stop.toObject() : stop]),
+      normalizeRouteStops(assignment.stops, assignment.loadGuide?.orders).map(stop => [routeStopKey(stop), stop]),
     );
     const nextStops = [];
 
@@ -1628,7 +1631,7 @@ const previewDriverRouteCustomization = async (req, res) => {
     }
 
     const currentStopsById = new Map(
-      assignment.stops.map((stop) => [routeStopKey(stop), stop.toObject ? stop.toObject() : stop]),
+      normalizeRouteStops(assignment.stops, assignment.loadGuide?.orders).map(stop => [routeStopKey(stop), stop]),
     );
     const nextStops = [];
 

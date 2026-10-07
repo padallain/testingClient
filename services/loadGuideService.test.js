@@ -197,6 +197,19 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
     priorityStop: { clientId: 'CLIENTE', sucursal: 'Sur' } };
   const preserved = await (await request(`/driver-routes/${existingId}/customize`, manualWithPriority, 'admin', 'PATCH')).json();
   assert.deepEqual(preserved.route.stops.map(stop => `${stop.clientId}|${stop.sucursal}`), ['CLIENTE|Sur', 'VECINO|', 'CLIENTE|Norte']);
+  const { normalizeDriverRoute } = require('./routeStopIdentity.service');
+  const ojeda = { ...savedAssignment.stops[0], clientId: '070201525', sucursal: '', nombre: 'Viveres De candido (OJEDA)', dispatched: false };
+  savedAssignment.stops = [ojeda, { ...ojeda }, { ...ojeda }, savedAssignment.stops[2]];
+  savedAssignment.loadGuide.orders = [{ clientId: '070201525', sucursal: 'OJEDA', total: 100 },
+    { clientId: '070201525', sucursal: 'OJEDA', total: 200 }, { clientId: 'CLIENTE', sucursal: 'Norte', total: 100 }];
+  const display = normalizeDriverRoute(savedAssignment);
+  assert.equal(display.stops.length, 2);
+  const cleanedSave = await (await request(`/driver-routes/${existingId}/customize`, {
+    stops: [...display.stops].reverse().map(stop => ({ clientId: stop.clientId, sucursal: stop.sucursal, stopKey: stop.stopKey })),
+  }, 'admin', 'PATCH')).json();
+  assert.equal(cleanedSave.route.stops.length, 2);
+  assert.equal(cleanedSave.route.loadGuide.orders.length, 3);
+  assert.equal(cleanedSave.route.stops[1].sucursal, 'OJEDA');
 });
 
 test('Liquidacion y Excel identifican empresas aunque el documento coincida', async () => {

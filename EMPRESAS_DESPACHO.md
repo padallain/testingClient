@@ -75,3 +75,14 @@ Con una prioridad marcada, el orden anterior no reemplaza el recorrido calculado
 En **Mi ruta**, la estrella aplica tambien a la vista y al guardar la personalizacion.
 La prioridad se identifica por RIF/ID y sede; dos sucursales no comparten la estrella.
 El modo espejo conserva la prioridad como primera parada y altera solo las restantes.
+
+## Listas antiguas con paradas repetidas
+
+Mi ruta normaliza las paradas al consultar, editar y guardar el orden. Las copias de
+una misma sede se muestran como una parada; todos los pedidos de esa sede se conservan.
+No se ejecuta una limpieza masiva ni se modifican documentos al consultar.
+
+Para registros sin sucursal, se recupera la sede si el nombre y los pedidos de la guia
+la identifican sin ambiguedad. Si no es posible, nombre y ubicacion distinguen paradas
+antiguas para no eliminar sucursales diferentes. La identidad enviada al editar/marcar
+es `stopKey`. El guardado explicito del orden conserva la lista normalizada.
