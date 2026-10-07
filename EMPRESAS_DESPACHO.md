@@ -64,3 +64,14 @@ Las paradas se identifican por RIF/ID y sucursal. El mismo RIF puede aparecer en
 sedes diferentes y varios pedidos de una misma sede se consolidan como una parada.
 En Mi ruta se puede elegir la sede al agregar un cliente. Marcar, ordenar y quitar
 paradas conserva esa identidad, sin afectar a otras sucursales del mismo cliente.
+
+## Estrella de prioridad al editar
+
+Marcar la estrella recalcula la vista previa desde esa parada: la sede marcada queda
+primero y las demas se organizan desde ella. La vista previa no crea ni modifica guias.
+**Actualizar guia** guarda ese orden en el mismo folio y conserva la prioridad al reabrir.
+Con una prioridad marcada, el orden anterior no reemplaza el recorrido calculado.
+
+En **Mi ruta**, la estrella aplica tambien a la vista y al guardar la personalizacion.
+La prioridad se identifica por RIF/ID y sede; dos sucursales no comparten la estrella.
+El modo espejo conserva la prioridad como primera parada y altera solo las restantes.

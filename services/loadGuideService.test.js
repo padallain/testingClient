@@ -69,7 +69,11 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   let tripStatus = 'draft';
   Client.find = query => ({ lean: async () => query.id ? currentClients.filter(item => item.id === query.id
     && (!Object.prototype.hasOwnProperty.call(query, 'sucursal') || item.sucursal === query.sucursal)) : currentClients });
-  planning.buildRouteOptions = async () => [{ type: 'closest', label: 'Mas cercana', estimatedDistanceKm: 5, route: currentClients }];
+  planning.buildRouteOptions = async (_clients, options = {}) => {
+    const anchor = currentClients.find(item => options.anchorStopKey === (item.sucursal ? `${item.id}|${item.sucursal}` : item.id));
+    return [{ type: 'closest', label: 'Mas cercana', estimatedDistanceKm: 5,
+      route: anchor ? [anchor, ...currentClients.filter(item => item !== anchor)] : currentClients }];
+  };
   Assignment.prototype.save = async function () { if (!savedAssignment || String(savedAssignment._id) !== String(this._id)) createdCount += 1;
     this.updatedAt = new Date(); savedAssignment = this.toObject(); return this; };
   Assignment.findById = () => ({ lean: async () => savedAssignment, then: resolve => resolve(new Assignment(savedAssignment)) });
@@ -85,12 +89,15 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   app.use((req, _res, next) => { if (req.headers['x-test-role']) req.session = { user: { id: req.headers['x-test-role'] } }; next(); });
   app.use('/dispatch-companies', require('../routes/dispatchCompany.routes'));
   app.post('/makeRoute', require('../controllers/routing.controllers').makeRoute);
+  app.post('/makeRoute/preview', require('../controllers/auth.controllers').requireAdminRole,
+    (req, res) => { req.previewOnly = true; return require('../controllers/routing.controllers').makeRoute(req, res); });
   app.patch('/driver-routes/:routeId/guide', require('../controllers/auth.controllers').requireAdminRole, require('../controllers/routing.controllers').makeRoute);
   const routing = require('../controllers/routing.controllers');
   app.post('/driver-routes/:routeId/stops', routing.addStopToDriverRoute);
   app.patch('/driver-routes/:routeId/stops/:clientId/dispatch', routing.updateStopDispatchStatus);
   app.delete('/driver-routes/:routeId/stops/:clientId', routing.removeStopFromDriverRoute);
   app.patch('/driver-routes/:routeId/customize', routing.customizeDriverRoute);
+  app.post('/driver-routes/:routeId/customize/preview', routing.previewDriverRouteCustomization);
   const server = await new Promise(resolve => { const running = app.listen(0, '127.0.0.1', () => resolve(running)); });
   context.after(() => { server.closeAllConnections(); server.close(); });
   const request = (path, body, role = 'admin', method = body ? 'POST' : 'GET') => fetch(`http://127.0.0.1:${server.address().port}${path}`, {
@@ -155,6 +162,41 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   assert.equal((await request(`/driver-routes/${existingId}/stops`, { clientId: 'CLIENTE', sucursal: 'Sur' })).status, 200);
   assert.equal((await request(`/driver-routes/${existingId}/stops`, { clientId: 'CLIENTE', sucursal: 'Sur' })).status, 409);
   assert.equal(savedAssignment.stops.length, 2);
+  const priorityUpdate = { ...update, updatedAt: savedAssignment.updatedAt, preserveRouteOrder: true,
+    anchorClientId: 'CLIENTE', anchorSucursal: 'Sur', anchorStopKey: 'CLIENTE|Sur' };
+  const priorityResponse = await (await request(`/driver-routes/${existingId}/guide`, priorityUpdate, 'admin', 'PATCH')).json();
+  assert.equal(priorityResponse.route[0].sucursal, 'Sur');
+  assert.equal(savedAssignment.stops[0].sucursal, 'Sur');
+  assert.equal(String(priorityResponse.savedRoute.routeId), existingId);
+  const creationsBeforePreview = createdCount;
+  const beforePreview = JSON.stringify(savedAssignment);
+  const preview = await (await request('/makeRoute/preview', { ...priorityUpdate, anchorSucursal: 'Norte', anchorStopKey: 'CLIENTE|Norte' })).json();
+  assert.equal(preview.previewOnly, true);
+  assert.equal(preview.route[0].sucursal, 'Norte');
+  assert.equal(preview.savedRoute, null);
+  assert.equal(createdCount, creationsBeforePreview);
+  assert.equal(JSON.stringify(savedAssignment), beforePreview);
+  assert.equal((await request('/makeRoute/preview', { ...priorityUpdate, anchorStopKey: 'CLIENTE|No existe' })).status, 400);
+  assert.equal((await request('/makeRoute/preview', priorityUpdate, 'chofer')).status, 403);
+  const driverPriority = { stops: [{ clientId: 'CLIENTE', sucursal: 'Norte' }, { clientId: 'CLIENTE', sucursal: 'Sur' }],
+    priorityStop: { clientId: 'CLIENTE', sucursal: 'Sur' } };
+  const driverPreview = await (await request(`/driver-routes/${existingId}/customize/preview`, driverPriority)).json();
+  assert.equal(driverPreview.preview.route[0].sucursal, 'Sur');
+  const driverSaved = await (await request(`/driver-routes/${existingId}/customize`, driverPriority, 'admin', 'PATCH')).json();
+  assert.equal(driverSaved.route.stops[0].sucursal, 'Sur');
+  assert.equal(driverSaved.route.stops[1].dispatched, true);
+  assert.equal(driverSaved.route.anchorSucursal, 'Sur');
+  const switchPriority = await (await request(`/driver-routes/${existingId}/customize`, {
+    ...driverPriority, priorityStop: { clientId: 'CLIENTE', sucursal: 'Norte' },
+  }, 'admin', 'PATCH')).json();
+  assert.equal(switchPriority.route.stops[0].sucursal, 'Norte');
+  assert.equal(switchPriority.route.anchorSucursal, 'Norte');
+  assert.equal((await request(`/driver-routes/${existingId}/customize/preview`, { ...driverPriority, priorityStop: { clientId: 'CLIENTE', sucursal: 'Inexistente' } })).status, 400);
+  savedAssignment.stops.push({ ...savedAssignment.stops[0], clientId: 'VECINO', sucursal: '', nombre: 'Vecino', order: 3 });
+  const manualWithPriority = { stops: [{ clientId: 'CLIENTE', sucursal: 'Sur' }, { clientId: 'VECINO', sucursal: '' }, { clientId: 'CLIENTE', sucursal: 'Norte' }],
+    priorityStop: { clientId: 'CLIENTE', sucursal: 'Sur' } };
+  const preserved = await (await request(`/driver-routes/${existingId}/customize`, manualWithPriority, 'admin', 'PATCH')).json();
+  assert.deepEqual(preserved.route.stops.map(stop => `${stop.clientId}|${stop.sucursal}`), ['CLIENTE|Sur', 'VECINO|', 'CLIENTE|Norte']);
 });
 
 test('Liquidacion y Excel identifican empresas aunque el documento coincida', async () => {
@@ -172,4 +214,25 @@ test('Liquidacion y Excel identifican empresas aunque el documento coincida', as
   assert.equal(workbook.getWorksheet('Pedidos').getCell('A2').value, 'Empresa A');
   assert.equal(workbook.getWorksheet('Pedidos').getCell('A3').value, 'Empresa B');
   assert.equal(workbook.getWorksheet('Devoluciones').getCell('A2').value, 'Empresa B');
+});
+
+test('Optimizador real: la prioridad fija una sede y conserva todas las paradas', async context => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  axios.post = async () => { throw new Error('Sin red durante la prueba'); };
+  context.after(() => { axios.post = originalPost; });
+  const { buildRouteOptions } = require('./routePlanning.service');
+  const clients = [
+    { id: 'J-PRUEBA', sucursal: 'Norte', nombre: 'Cliente Norte', location: { latitude: 10.7, longitude: -71.6 } },
+    { id: 'J-PRUEBA', sucursal: 'Sur', nombre: 'Cliente Sur', location: { latitude: 10.61, longitude: -71.7 } },
+    { id: 'CERCANO', nombre: 'Cliente cercano', location: { latitude: 10.62, longitude: -71.69 } },
+    { id: 'LEJANO', nombre: 'Cliente lejano', location: { latitude: 10.75, longitude: -71.61 } },
+  ];
+  const options = await buildRouteOptions(clients, { anchorClientId: 'J-PRUEBA', anchorSucursal: 'Sur', anchorStopKey: 'J-PRUEBA|Sur' });
+  assert.ok(options.length);
+  for (const option of options) {
+    assert.equal(option.route[0].id, 'J-PRUEBA');
+    assert.equal(option.route[0].sucursal, 'Sur');
+    assert.equal(new Set(option.route.map(stop => `${stop.id}|${stop.sucursal || ''}`)).size, 4);
+  }
 });

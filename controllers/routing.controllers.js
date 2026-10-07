@@ -53,6 +53,22 @@ const buildAssignmentStops = (routeStops) => routeStops.map((client, index) => (
   dispatchedAt: null,
 }));
 
+async function orderStopsFromPriority(stops, priority, recalculate = false) {
+  if (!priority) return stops;
+  const byKey = new Map(stops.map(stop => [routeStopKey(stop), stop]));
+  const key = resolveRouteStopKey(byKey, priority);
+  const anchor = byKey.get(key);
+  if (!anchor) { const error = new Error('La sede prioritaria no pertenece a la ruta.'); error.statusCode = 400; throw error; }
+  if (!recalculate && routeStopKey(stops[0]) === key) return stops;
+  const options = await buildRouteOptions(mapStopsForArtifacts(stops), {
+    anchorClientId: anchor.clientId, anchorSucursal: anchor.sucursal || '',
+    anchorStopKey: anchor.sucursal ? `${anchor.clientId}|${anchor.sucursal}` : anchor.clientId,
+  });
+  const option = options.find(item => item.type === 'closest') || options[0];
+  if (!option || option.route.length !== stops.length) { const error = new Error('No se pudo organizar toda la ruta desde la prioridad.'); error.statusCode = 400; throw error; }
+  return option.route.map((stop, index) => ({ ...byKey.get(routeStopKey(stop)), order: index + 1 }));
+}
+
 const mergeStopProgress = (stops, progressSourceStops) => {
   const progressByClientId = new Map(
     (Array.isArray(progressSourceStops) ? progressSourceStops : []).map((stop) => [
@@ -682,7 +698,7 @@ const makeRoute = async (req, res) => {
     const anchorSucursal = typeof req.body?.anchorSucursal === "string" ? req.body.anchorSucursal.trim() : null;
     const anchorStopKey = typeof req.body?.anchorStopKey === "string" ? req.body.anchorStopKey.trim() : null;
     const { normalizedStops, uniqueStops, duplicateClientIds } = normalizeRequestedStops({ ids, stops });
-    const preserveRouteOrder = Boolean(req.body?.preserveRouteOrder);
+    const preserveRouteOrder = Boolean(req.body?.preserveRouteOrder) && !anchorClientId && !anchorStopKey;
 
     if (!Array.isArray(normalizedStops)) {
       return res
@@ -713,6 +729,14 @@ const makeRoute = async (req, res) => {
         : { id: stop.clientId },
     );
     const clients = await Client.find({ $or: clientQueryConditions }).lean();
+    if (anchorClientId || anchorStopKey) {
+      const priority = clients.find(client => anchorStopKey
+        ? (client.sucursal ? `${client.id}|${client.sucursal}` : String(client.id)) === anchorStopKey
+        : String(client.id) === anchorClientId && (!anchorSucursal || String(client.sucursal || '') === anchorSucursal));
+      if (!priority || !Number.isFinite(Number(priority.location?.latitude)) || !Number.isFinite(Number(priority.location?.longitude))) {
+        return res.status(400).json({ message: 'La parada prioritaria no pertenece a la ruta o no tiene coordenadas validas.' });
+      }
+    }
 
     // Detect missing stops using (id + sucursal) as the compound key
     const foundStopKeys = new Set(
@@ -806,7 +830,7 @@ const makeRoute = async (req, res) => {
 
     let savedRoute = null;
 
-    if (normalizedDriverId) {
+    if (normalizedDriverId && !req.previewOnly) {
       const assignmentStops = existingAssignment ? mergeStopProgress(buildAssignmentStops(response), existingAssignment.stops) : buildAssignmentStops(response);
       const recommendedArtifacts = buildRouteArtifacts(recommendedRouteOption.route);
       const recommendedAssignmentStops = buildAssignmentStops(recommendedArtifacts.response);
@@ -819,6 +843,10 @@ const makeRoute = async (req, res) => {
         loadGuide,
         routeType: selectedRouteOption.type,
         routeTypeLabel: selectedRouteOption.label,
+        anchorClientId: anchorClientId || '',
+        anchorSucursal: anchorSucursal || '',
+        anchorStopKey: anchorStopKey || '',
+        anchorReason: req.body.anchorReason === 'weight' ? 'weight' : 'priority',
         uniqueClientCount,
         totalWeight,
         totalDistanceKm,
@@ -870,11 +898,16 @@ const makeRoute = async (req, res) => {
         status: assignment.status,
         updatedAt: assignment.updatedAt,
         updated: Boolean(existingAssignment),
+        anchorClientId: assignment.anchorClientId,
+        anchorSucursal: assignment.anchorSucursal,
+        anchorStopKey: assignment.anchorStopKey,
+        anchorReason: assignment.anchorReason,
       };
     }
 
     res.status(200).json({
       updated: Boolean(existingAssignment),
+      previewOnly: Boolean(req.previewOnly),
       route: response,
       routeNames: response.map((client) => client.nombre),
       routeType: selectedRouteOption.type,
@@ -1474,7 +1507,15 @@ const customizeDriverRoute = async (req, res) => {
       return res.status(400).json({ message: "The customized route must include all assigned stops" });
     }
 
-    await applyRouteArtifactsToAssignment(assignment, nextStops);
+    const priorityStops = await orderStopsFromPriority(nextStops, req.body.priorityStop);
+    await applyRouteArtifactsToAssignment(assignment, priorityStops);
+    if (Object.prototype.hasOwnProperty.call(req.body, 'priorityStop')) {
+      const anchor = req.body.priorityStop ? priorityStops[0] : null;
+      assignment.anchorClientId = anchor?.clientId || '';
+      assignment.anchorSucursal = anchor?.sucursal || '';
+      assignment.anchorStopKey = anchor ? (anchor.sucursal ? `${anchor.clientId}|${anchor.sucursal}` : anchor.clientId) : '';
+      assignment.anchorReason = 'priority';
+    }
     assignment.wasDriverModified = true;
     assignment.driverModifiedAt = new Date();
     assignment.status = calculateRouteStatus(assignment);
@@ -1486,7 +1527,7 @@ const customizeDriverRoute = async (req, res) => {
     });
   } catch (err) {
     console.log("Error personalizando ruta del chofer:", err);
-    res.status(500).json({ message: "Error customizing driver route" });
+    res.status(err.statusCode || 500).json({ message: err.statusCode ? err.message : 'Error customizing driver route' });
   }
 };
 
@@ -1607,13 +1648,15 @@ const previewDriverRouteCustomization = async (req, res) => {
       return res.status(400).json({ message: "The customized route must include all assigned stops" });
     }
 
-    const normalizedStops = mapStopsForArtifacts(nextStops);
+    const priorityStops = await orderStopsFromPriority(nextStops, req.body.priorityStop, req.body.recalculatePriority === true);
+    const normalizedStops = mapStopsForArtifacts(priorityStops);
     const { googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(normalizedStops);
     const totalDistanceKm = await calculateRouteDistance(normalizedStops);
 
     return res.status(200).json({
       message: "Route preview calculated successfully",
       preview: {
+        route: priorityStops,
         totalDistanceKm,
         googleMapsRouteLinks,
         openRouteLink,
@@ -1621,7 +1664,7 @@ const previewDriverRouteCustomization = async (req, res) => {
     });
   } catch (err) {
     console.log("Error previsualizando ruta del chofer:", err);
-    return res.status(500).json({ message: "Error previewing driver route customization" });
+    return res.status(err.statusCode || 500).json({ message: err.statusCode ? err.message : 'Error previewing driver route customization' });
   }
 };
 

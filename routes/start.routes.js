@@ -174,6 +174,7 @@ router.delete('/internal/admin/deleteClient/:id', requireAdminRole, requireAdmin
  
 // Rutas de logística
 router.post('/makeRoute', makeRoute);
+router.post('/makeRoute/preview', requireAdminRole, (req, res) => { req.previewOnly = true; return makeRoute(req, res); });
 router.patch('/driver-routes/:routeId/guide', requireAdminRole, makeRoute);
 router.get('/driver-routes/:driverId/current', getDriverCurrentRoute);
 router.get('/driver-routes/by-id/:routeId', getDriverRouteById);

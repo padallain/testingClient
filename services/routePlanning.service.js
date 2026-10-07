@@ -494,13 +494,13 @@ const optimizeClosedRouteWithTwoOptAndOrOpt = (route, distanceMatrix, lockedPref
   return bestRoute;
 };
 
-const buildGreedyRoute = (indexedClients, distanceMatrix, pickFarthest = false) => {
+const buildGreedyRoute = (indexedClients, distanceMatrix, pickFarthest = false, lockedPrefixLength = 0) => {
   if (indexedClients.length === 0) {
     return [];
   }
 
   const route = [];
-  const hasLockedStart = indexedClients[0].id === START_ID;
+  const hasLockedStart = lockedPrefixLength > 0 || indexedClients[0].id === START_ID;
   let currentIndex = 0;
   const unvisited = [...indexedClients];
 
@@ -532,12 +532,12 @@ const buildGreedyRoute = (indexedClients, distanceMatrix, pickFarthest = false) 
   return route;
 };
 
-const buildAlphabeticalRoute = (indexedClients) => {
+const buildAlphabeticalRoute = (indexedClients, lockedPrefixLength = 0) => {
   if (indexedClients.length === 0) {
     return [];
   }
 
-  const hasLockedStart = indexedClients[0].id === START_ID;
+  const hasLockedStart = lockedPrefixLength > 0 || indexedClients[0].id === START_ID;
   const [fixedStart, ...remainingClients] = hasLockedStart ? indexedClients : [null, ...indexedClients];
   const sortedClients = [...remainingClients].sort((leftClient, rightClient) => {
     const leftKey = `${String(leftClient.nombre || "").trim().toLowerCase()}-${String(leftClient.id || "")}`;
@@ -643,7 +643,7 @@ const buildRouteOptions = async (clients, options = {}) => {
 
   const lockedPrefixLength = startClient ? 1 : 0;
 
-  const closestGreedy = buildGreedyRoute(indexedClients, distanceMatrix, false);
+  const closestGreedy = buildGreedyRoute(indexedClients, distanceMatrix, false, lockedPrefixLength);
   const closestOptimized = optimizeClosedRouteWithTwoOptAndOrOpt(closestGreedy, distanceMatrix, lockedPrefixLength);
   const mirroredIndexed = buildMirroredIndexedRoute(closestOptimized, lockedPrefixLength);
 
@@ -656,13 +656,13 @@ const buildRouteOptions = async (clients, options = {}) => {
     ),
     buildRouteOption(
       ROUTE_TYPE_META.farthest,
-      buildGreedyRoute(indexedClients, distanceMatrix, true),
+      buildGreedyRoute(indexedClients, distanceMatrix, true, lockedPrefixLength),
       distanceMatrix,
       lockedPrefixLength,
     ),
     buildRouteOption(
       ROUTE_TYPE_META.alphabetical,
-      buildAlphabeticalRoute(indexedClients),
+      buildAlphabeticalRoute(indexedClients, lockedPrefixLength),
       distanceMatrix,
       lockedPrefixLength,
     ),
@@ -681,7 +681,7 @@ const buildRouteOptions = async (clients, options = {}) => {
   const seenSignatures = new Set();
 
   return optionBuilders.filter((option) => {
-    const signature = option.route.map((client) => client.id).join("|");
+    const signature = option.route.map(buildClientStopKey).join('|');
 
     if (seenSignatures.has(signature)) {
       return false;
