@@ -1,0 +1,53 @@
+const mongoose = require('mongoose');
+
+const optionalNumber = { type: Number, default: null, min: 0 };
+const schema = new mongoose.Schema({
+  routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'RouteAssignment', required: true, unique: true },
+  guideNumber: { type: String, required: true },
+  guideSnapshot: { type: mongoose.Schema.Types.Mixed, required: true },
+  routeSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+  issueReportsSnapshot: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+  deliveryOutcome: { type: String, enum: ['', 'sin_novedad', 'con_devoluciones', 'con_novedades'], default: '' },
+  returns: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  settledBy: { type: mongoose.Schema.Types.Mixed, default: null },
+  date: { type: String, required: true, index: true },
+  status: { type: String, enum: ['draft', 'closed'], default: 'draft', index: true },
+  vehicleId: { type: String, required: true, index: true },
+  vehicleTypeId: { type: String, default: '' },
+  vehicleName: { type: String, default: '' },
+  driverId: { type: String, default: '', index: true },
+  driverName: { type: String, default: '' },
+  helperName: { type: String, default: '' },
+  zone: { type: String, required: true, index: true },
+  routeCode: { type: String, required: true, index: true },
+  freightType: { type: String, enum: ['interno', 'externo'], required: true, index: true },
+  carrierId: { type: String, default: '', index: true },
+  carrierName: { type: String, default: '' },
+  tariff: { type: mongoose.Schema.Types.Mixed, default: null },
+  comparisonVehicleTypeId: { type: String, default: '' },
+  loadedAmount: { type: Number, required: true, min: 0 },
+  returnedAmount: optionalNumber,
+  loadedKg: optionalNumber,
+  deliveredKg: optionalNumber,
+  loadedPackages: optionalNumber,
+  deliveredPackages: optionalNumber,
+  capacityKg: optionalNumber,
+  capacityPackages: optionalNumber,
+  plannedStops: optionalNumber,
+  attendedStops: optionalNumber,
+  departureAt: { type: Date, default: null },
+  returnAt: { type: Date, default: null },
+  km: optionalNumber,
+  estimatedKm: optionalNumber,
+  estimatedAllowances: optionalNumber,
+  fuelLiters: optionalNumber,
+  allowances: optionalNumber,
+  configurationSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+  metricsSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+  closedAt: { type: Date, default: null },
+  notes: { type: String, default: '' },
+}, { timestamps: true });
+schema.index({ date: 1, vehicleId: 1 });
+schema.index({ date: 1, zone: 1, freightType: 1 });
+
+module.exports = mongoose.model('TransportTrip', schema);

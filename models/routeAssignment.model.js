@@ -4,6 +4,7 @@ const routeStopSchema = new mongoose.Schema(
   {
     order: { type: Number, required: true },
     clientId: { type: String, required: true, trim: true },
+    sucursal: { type: String, default: '', trim: true },
     nombre: { type: String, required: true, trim: true },
     weight: { type: Number, default: 0, min: 0 },
     location: {
@@ -33,6 +34,7 @@ const routeAssignmentSchema = new mongoose.Schema(
     driverName: { type: String, default: '', trim: true },
     routeLabel: { type: String, required: true, trim: true },
     routeComment: { type: String, default: '', trim: true },
+    loadGuide: { type: mongoose.Schema.Types.Mixed, default: null },
     routeType: { type: String, default: 'closest', trim: true },
     routeTypeLabel: { type: String, default: 'Mas cercana', trim: true },
     uniqueClientCount: { type: Number, required: true, min: 0 },

@@ -82,8 +82,6 @@ router.post('/recover-password/request-code', requestPasswordResetCode);
 router.post('/recover-password/verify-code', verifyPasswordResetCode);
 router.post('/recover-password/reset', resetPasswordWithCode);
 
-router.use(authMiddleware);
-
 // Administración de usuarios
 router.get('/internal/admin/users', requireAdminRole, listUsersForAdmin);
 router.get('/internal/admin/users/reporters', requireAdminRole, listReporterUsersForAdmin);
@@ -153,6 +151,12 @@ router.post('/internal/cron/daily-check-reminder', requireCronKey, async (req, r
     return res.status(500).json({ message: 'No se pudo ejecutar el reporte diario desde cron.' });
   }
 });
+
+router.use(authMiddleware);
+
+router.use('/transport-kpis', require('./transport.routes'));
+router.use('/dispatch-companies', require('./dispatchCompany.routes'));
+
 router.post('/internal/admin/notifications/whatsapp-test', requireAdminRole, sendTestWhatsAppByAdmin);
 router.post('/internal/admin/notifications/reminder-whatsapp', requireAdminRole, sendReminderWhatsAppByAdmin);
 
@@ -170,6 +174,7 @@ router.delete('/internal/admin/deleteClient/:id', requireAdminRole, requireAdmin
  
 // Rutas de logística
 router.post('/makeRoute', makeRoute);
+router.patch('/driver-routes/:routeId/guide', requireAdminRole, makeRoute);
 router.get('/driver-routes/:driverId/current', getDriverCurrentRoute);
 router.get('/driver-routes/by-id/:routeId', getDriverRouteById);
 router.get('/driver-routes/:routeId/export-gpx', exportRouteAsGpx);

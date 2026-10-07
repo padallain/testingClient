@@ -1,5 +1,8 @@
 const Client = require("../models/client.model");
 const RouteAssignment = require("../models/routeAssignment.model");
+const TransportTrip = require("../models/transportTrip.model");
+const { normalizeLoadGuide } = require("../services/loadGuideService");
+const { loadDispatchCompanies } = require("../services/dispatchCompany.service");
 const DispatchIssueReport = require("../models/dispatchIssueReport.model");
 const {
   buildMissingClients,
@@ -21,9 +24,17 @@ const {
   calculateRouteStatus,
 } = require("../services/routeStatus.service");
 
+const routeStopKey = stop => JSON.stringify([String(stop?.clientId || stop?.id || '').trim(), String(stop?.sucursal || '').trim()]);
+const resolveRouteStopKey = (stops, rawStop) => {
+  if (Object.prototype.hasOwnProperty.call(rawStop, 'sucursal')) return routeStopKey(rawStop);
+  const matches = [...stops].filter(([, stop]) => stop.clientId === rawStop.clientId);
+  return matches.length === 1 ? matches[0][0] : null;
+};
+
 const mapStopsForArtifacts = (stops) => (Array.isArray(stops)
   ? stops.map((stop) => ({
       id: stop.clientId,
+      sucursal: stop.sucursal || '',
       nombre: stop.nombre,
       weight: stop.weight,
       location: stop.location,
@@ -33,6 +44,7 @@ const mapStopsForArtifacts = (stops) => (Array.isArray(stops)
 const buildAssignmentStops = (routeStops) => routeStops.map((client, index) => ({
   order: index + 1,
   clientId: client.id,
+  sucursal: client.sucursal || '',
   nombre: client.nombre,
   weight: Number(client.weight) || 0,
   location: client.location,
@@ -44,7 +56,7 @@ const buildAssignmentStops = (routeStops) => routeStops.map((client, index) => (
 const mergeStopProgress = (stops, progressSourceStops) => {
   const progressByClientId = new Map(
     (Array.isArray(progressSourceStops) ? progressSourceStops : []).map((stop) => [
-      String(stop?.clientId || ""),
+      routeStopKey(stop),
       {
         dispatched: Boolean(stop?.dispatched),
         dispatchedAt: stop?.dispatchedAt || null,
@@ -53,7 +65,7 @@ const mergeStopProgress = (stops, progressSourceStops) => {
   );
 
   return stops.map((stop, index) => {
-    const progress = progressByClientId.get(String(stop?.clientId || ""));
+    const progress = progressByClientId.get(routeStopKey(stop));
 
     return {
       ...stop,
@@ -75,6 +87,7 @@ const buildRecommendedStopsFromAssignment = async (assignment) => {
 
   const optimizedRoute = await buildOptimizedRoute(currentStops.map((stop) => ({
     id: stop.clientId,
+    sucursal: stop.sucursal || '',
     nombre: stop.nombre,
     weight: stop.weight,
     location: stop.location,
@@ -84,10 +97,10 @@ const buildRecommendedStopsFromAssignment = async (assignment) => {
     return [];
   }
 
-  const stopsByClientId = new Map(currentStops.map((stop) => [String(stop.clientId), stop]));
+  const stopsByClientId = new Map(currentStops.map((stop) => [routeStopKey(stop), stop]));
 
   return optimizedRoute.map((client, index) => {
-    const existingStop = stopsByClientId.get(String(client.id));
+    const existingStop = stopsByClientId.get(routeStopKey(client));
 
     return {
       ...existingStop,
@@ -651,6 +664,18 @@ const buildMonthlyAnalyticsHistory = (routes, selectedMonthStart) => {
 
 const makeRoute = async (req, res) => {
   try {
+    const updatingId = req.params?.routeId;
+    let existingAssignment = null;
+    if (updatingId) {
+      if (!require('mongoose').isValidObjectId(updatingId)) return res.status(400).json({ message: 'Folio de guia invalido.' });
+      existingAssignment = await RouteAssignment.findById(updatingId).lean();
+      if (!existingAssignment) return res.status(404).json({ message: 'Guia no encontrada.' });
+      const trip = await TransportTrip.findOne({ routeId: updatingId }).lean();
+      if (existingAssignment.status === 'completed' || trip?.status === 'closed') return res.status(409).json({ message: 'No se puede editar una guia terminada o liquidada.' });
+      if (!req.body.updatedAt || new Date(req.body.updatedAt).getTime() !== new Date(existingAssignment.updatedAt).getTime()) {
+        return res.status(409).json({ message: 'La guia cambio. Recarga sus datos antes de actualizar.' });
+      }
+    }
     const { ids, stops, driverId, driverName, routeLabel, routeType, routeComment } = req.body;
     const routeWeight = normalizeWeight(req.body?.routeWeight);
     const anchorClientId = typeof req.body?.anchorClientId === "string" ? req.body.anchorClientId.trim() : null;
@@ -668,6 +693,18 @@ const makeRoute = async (req, res) => {
     if (uniqueStops.length === 0) {
       return res.status(400).json({ message: "At least one valid client ID is required" });
     }
+
+    const companyCatalog = req.body.loadGuide ? await loadDispatchCompanies() : {};
+    let loadGuide = null;
+    try {
+      loadGuide = normalizeLoadGuide(req.body.loadGuide, uniqueStops, { ...companyCatalog, requireCompany: true });
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (loadGuide && !String(driverId || '').trim()) {
+      return res.status(400).json({ message: "Ingresa el ID del chofer para guardar la ruta y sus pedidos." });
+    }
+    if (updatingId && !loadGuide) return res.status(400).json({ message: 'Incluye los pedidos de la guia que quieres actualizar.' });
 
     // Query each stop individually so branch clients fetch only the selected sede
     const clientQueryConditions = uniqueStops.map((stop) =>
@@ -692,6 +729,16 @@ const makeRoute = async (req, res) => {
         resolvedAt: null,
       }));
     const notFoundIds = notFoundClients.map((c) => c.clientId);
+    if (loadGuide && notFoundIds.length) {
+      return res.status(400).json({ message: "Todos los clientes de la guia deben existir en la ruta.", notFoundIds });
+    }
+    if (loadGuide) {
+      loadGuide.orders = loadGuide.orders.map((order) => {
+        const client = clients.find((current) => String(current.id) === order.clientId
+          && (!order.sucursal || String(current.sucursal || '') === order.sucursal));
+        return { ...order, clientName: client.sucursal ? `${client.nombre} - ${client.sucursal}` : client.nombre };
+      });
+    }
     const uniqueIds = uniqueStops.map((stop) => stop.clientId);
     const explicitRouteOrder = preserveRouteOrder
       ? uniqueStops.map(({ clientId, sucursal }) => {
@@ -760,14 +807,16 @@ const makeRoute = async (req, res) => {
     let savedRoute = null;
 
     if (normalizedDriverId) {
-      const assignmentStops = buildAssignmentStops(response);
+      const assignmentStops = existingAssignment ? mergeStopProgress(buildAssignmentStops(response), existingAssignment.stops) : buildAssignmentStops(response);
       const recommendedArtifacts = buildRouteArtifacts(recommendedRouteOption.route);
       const recommendedAssignmentStops = buildAssignmentStops(recommendedArtifacts.response);
-      const assignment = new RouteAssignment({
+      let assignment = new RouteAssignment({
+        ...(existingAssignment ? { _id: existingAssignment._id } : {}),
         driverId: normalizedDriverId,
         driverName: typeof driverName === "string" ? driverName.trim() : "",
         routeLabel: buildRouteLabel({ driverId: normalizedDriverId, requestedLabel: routeLabel }),
         routeComment: typeof routeComment === "string" ? routeComment.trim() : "",
+        loadGuide,
         routeType: selectedRouteOption.type,
         routeTypeLabel: selectedRouteOption.label,
         uniqueClientCount,
@@ -792,8 +841,20 @@ const makeRoute = async (req, res) => {
         driverId: normalizedDriverId,
         requestedLabel: routeLabel,
       });
+      if (existingAssignment) assignment.routeLabel = existingAssignment.routeLabel;
 
-      await assignment.save();
+      if (loadGuide) {
+        assignment.loadGuide = { ...loadGuide, number: existingAssignment?.loadGuide?.number || assignment.routeLabel,
+          date: existingAssignment?.loadGuide?.date || new Date().toISOString().slice(0, 10) };
+      }
+
+      if (existingAssignment) {
+        const updated = assignment.toObject();
+        for (const field of ['_id', '__v', 'createdAt', 'updatedAt', 'wasDriverModified', 'driverModifiedAt']) delete updated[field];
+        assignment = await RouteAssignment.findOneAndUpdate({ _id: updatingId, status: 'active', updatedAt: existingAssignment.updatedAt },
+          { $set: updated }, { new: true, runValidators: true }).lean();
+        if (!assignment) return res.status(409).json({ message: 'La guia fue modificada por otra solicitud. Recarga antes de guardar.' });
+      } else await assignment.save();
 
       savedRoute = {
         routeId: assignment._id,
@@ -801,14 +862,19 @@ const makeRoute = async (req, res) => {
         driverName: assignment.driverName,
         routeLabel: assignment.routeLabel,
         routeComment: assignment.routeComment,
+        loadGuide: assignment.loadGuide,
         routeType: selectedRouteOption.type,
         routeTypeLabel: selectedRouteOption.label,
+        totalWeight: assignment.totalWeight,
         totalDistanceKm: assignment.totalDistanceKm,
         status: assignment.status,
+        updatedAt: assignment.updatedAt,
+        updated: Boolean(existingAssignment),
       };
     }
 
     res.status(200).json({
+      updated: Boolean(existingAssignment),
       route: response,
       routeNames: response.map((client) => client.nombre),
       routeType: selectedRouteOption.type,
@@ -1166,7 +1232,10 @@ const updateStopDispatchStatus = async (req, res) => {
       return res.status(404).json({ message: "Route not found" });
     }
 
-    const stop = assignment.stops.find((item) => item.clientId === clientId);
+    const matches = assignment.stops.filter(item => item.clientId === clientId
+      && (!Object.prototype.hasOwnProperty.call(req.body || {}, 'sucursal') || (item.sucursal || '') === String(req.body.sucursal || '').trim()));
+    if (matches.length > 1) return res.status(409).json({ message: 'Selecciona la sede del cliente que quieres marcar.' });
+    const stop = matches[0];
 
     if (!stop) {
       return res.status(404).json({ message: "Stop not found in route" });
@@ -1215,10 +1284,6 @@ const addStopToDriverRoute = async (req, res) => {
       ? assignment.stops.map((stop) => (stop?.toObject ? stop.toObject() : stop))
       : [];
 
-    if (currentStops.some((stop) => String(stop?.clientId || "") === normalizedClientId)) {
-      return res.status(409).json({ message: "This client is already part of the route" });
-    }
-
     const clientQuery = hasSucursalField
       ? { id: normalizedClientId, sucursal: normalizedSucursal }
       : { id: normalizedClientId };
@@ -1254,6 +1319,16 @@ const addStopToDriverRoute = async (req, res) => {
     }
 
     const selectedClient = matchedClients[0];
+    const selectedKey = routeStopKey({ clientId: normalizedClientId, sucursal: selectedClient.sucursal || '' });
+    const branchOptions = [...new Set((assignment.loadGuide?.orders || []).filter(order => order.clientId === normalizedClientId).map(order => String(order.sucursal || '')))];
+    if (branchOptions.length === 1 && currentStops.filter(stop => stop.clientId === normalizedClientId).length === 1) {
+      const oldStop = currentStops.find(stop => stop.clientId === normalizedClientId);
+      if (!oldStop.sucursal) oldStop.sucursal = branchOptions[0];
+    }
+    if (currentStops.some(stop => {
+      const branch = stop.sucursal || (branchOptions.length === 1 && currentStops.filter(item => item.clientId === normalizedClientId).length === 1 ? branchOptions[0] : '');
+      return routeStopKey({ clientId: stop.clientId, sucursal: branch }) === selectedKey;
+    })) return res.status(409).json({ message: 'El cliente y esta sede ya estan incluidos en la ruta.' });
     const hasValidCoordinates = Number.isFinite(Number(selectedClient?.location?.latitude))
       && Number.isFinite(Number(selectedClient?.location?.longitude));
 
@@ -1266,6 +1341,7 @@ const addStopToDriverRoute = async (req, res) => {
     const nextStop = {
       order: currentStops.length + 1,
       clientId: normalizedClientId,
+      sucursal: selectedClient.sucursal || '',
       nombre: branchSuffix ? `${displayName} (${branchSuffix})` : displayName,
       weight: Number(selectedClient?.weight) || 0,
       location: {
@@ -1330,13 +1406,16 @@ const removeStopFromDriverRoute = async (req, res) => {
       return res.status(400).json({ message: "The route must keep at least one client" });
     }
 
-    const stopExists = currentStops.some((stop) => String(stop?.clientId || "") === normalizedClientId);
+    const matches = currentStops.filter(stop => String(stop.clientId || '') === normalizedClientId
+      && (!Object.prototype.hasOwnProperty.call(req.query || {}, 'sucursal') || (stop.sucursal || '') === String(req.query.sucursal || '').trim()));
+    if (matches.length > 1) return res.status(409).json({ message: 'Selecciona la sede del cliente que quieres quitar.' });
+    const stopExists = matches.length === 1;
 
     if (!stopExists) {
       return res.status(404).json({ message: "Stop not found in route" });
     }
 
-    const nextStops = currentStops.filter((stop) => String(stop?.clientId || "") !== normalizedClientId);
+    const nextStops = currentStops.filter(stop => routeStopKey(stop) !== routeStopKey(matches[0]));
 
     await applyRouteArtifactsToAssignment(assignment, nextStops);
     assignment.uniqueClientCount = assignment.stops.length;
@@ -1375,19 +1454,20 @@ const customizeDriverRoute = async (req, res) => {
     }
 
     const currentStopsById = new Map(
-      assignment.stops.map((stop) => [String(stop.clientId), stop.toObject ? stop.toObject() : stop]),
+      assignment.stops.map((stop) => [routeStopKey(stop), stop.toObject ? stop.toObject() : stop]),
     );
     const nextStops = [];
 
     for (const rawStop of submittedStops) {
       const clientId = String(rawStop?.clientId || "").trim();
+      const key = resolveRouteStopKey(currentStopsById, { ...rawStop, clientId });
 
-      if (!clientId || !currentStopsById.has(clientId)) {
+      if (!clientId || !currentStopsById.has(key)) {
         return res.status(400).json({ message: `Stop ${clientId || "unknown"} is not part of the assigned route` });
       }
 
-      nextStops.push(currentStopsById.get(clientId));
-      currentStopsById.delete(clientId);
+      nextStops.push(currentStopsById.get(key));
+      currentStopsById.delete(key);
     }
 
     if (currentStopsById.size > 0) {
@@ -1507,19 +1587,20 @@ const previewDriverRouteCustomization = async (req, res) => {
     }
 
     const currentStopsById = new Map(
-      assignment.stops.map((stop) => [String(stop.clientId), stop.toObject ? stop.toObject() : stop]),
+      assignment.stops.map((stop) => [routeStopKey(stop), stop.toObject ? stop.toObject() : stop]),
     );
     const nextStops = [];
 
     for (const rawStop of submittedStops) {
       const clientId = String(rawStop?.clientId || "").trim();
+      const key = resolveRouteStopKey(currentStopsById, { ...rawStop, clientId });
 
-      if (!clientId || !currentStopsById.has(clientId)) {
+      if (!clientId || !currentStopsById.has(key)) {
         return res.status(400).json({ message: `Stop ${clientId || "unknown"} is not part of the assigned route` });
       }
 
-      nextStops.push(currentStopsById.get(clientId));
-      currentStopsById.delete(clientId);
+      nextStops.push(currentStopsById.get(key));
+      currentStopsById.delete(key);
     }
 
     if (currentStopsById.size > 0) {
