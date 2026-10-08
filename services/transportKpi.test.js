@@ -274,3 +274,11 @@ test('Planificacion se guarda sin datos finales ni convierte estimados en reales
   const closed = normalizeTrip({ ...beforeDeparture, status: 'closed', km: 200, allowances: 0, returnedAmount: 0 }, route, configuration);
   assert.equal(closed.metricsSnapshot.cost, 101.57);
 });
+
+test('Estatus de despacho anuncia guia editable solo cuando existe', () => {
+  const { buildRouteDispatchStatusSummary } = require('./routeStatus.service');
+  const base = { _id: 'ruta-test', stops: [], missingClients: [], uniqueClientCount: 0 };
+  assert.equal(buildRouteDispatchStatusSummary(base).hasLoadGuide, false);
+  assert.equal(buildRouteDispatchStatusSummary({ ...base, loadGuide: { orders: [{ total: 10 }] } }).hasLoadGuide, true);
+  assert.equal(buildRouteDispatchStatusSummary({ ...base, loadGuide: { orders: [] } }).hasLoadGuide, false);
+});

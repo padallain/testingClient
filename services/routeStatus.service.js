@@ -26,6 +26,7 @@ const buildRouteDispatchStatusSummary = (assignment) => {
   return {
     routeId: assignment._id,
     routeLabel: assignment.routeLabel || "Ruta sin nombre",
+    hasLoadGuide: Array.isArray(assignment?.loadGuide?.orders) && assignment.loadGuide.orders.length > 0,
     driverId: assignment.driverId || "",
     driverName: assignment.driverName || "",
     status: assignment.status || calculateRouteStatus({ stops, missingClients }),
