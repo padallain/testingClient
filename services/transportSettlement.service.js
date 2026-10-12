@@ -16,6 +16,8 @@ function normalizeSettlement(value, guide) {
     if (amount <= 0) fail('La devolucion debe ser al menos $0.01.');
     const reason = String(item.reason || '').trim();
     if (!reason) fail('Indica el motivo de cada devolucion.');
+    const productCode = String(item.productCode || '').trim();
+    if (!productCode || productCode.length > 100) fail('Indica el codigo del producto devuelto (maximo 100 caracteres).');
     totals.set(orderIndex, (totals.get(orderIndex) || 0) + Math.round(amount * 100));
     if (totals.get(orderIndex) > Math.round(Number(order.total) * 100)) fail('La devolucion supera el monto del pedido.');
     const quantity = (input, integer = false) => {
@@ -25,7 +27,7 @@ function normalizeSettlement(value, guide) {
     };
     return { orderIndex, orderNumber: order.orderNumber, clientId: order.clientId, clientName: order.clientName,
       companyId: order.companyId || null, companyName: order.companyName || order.company || null,
-      sucursal: order.sucursal || '', amount, reason, kg: quantity(item.kg), packages: quantity(item.packages, true) };
+      sucursal: order.sucursal || '', productCode, amount, reason, kg: quantity(item.kg), packages: quantity(item.packages, true) };
   });
   const returnedAmount = money(value.returnedAmount);
   const sum = returns.reduce((total, item) => total + Math.round(item.amount * 100), 0) / 100;

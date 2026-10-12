@@ -243,62 +243,10 @@ const deleteClient = async (req, res) => {
 };
 
 const createClientLocationReport = async (req, res) => {
-  try {
-    const { clientId, reporterName, details } = req.body;
-
-    if (!clientId || !details) {
-      return res.status(400).json({ message: "Client ID and details are required" });
-    }
-
-    const normalizedClientId = String(clientId).trim();
-    const normalizedDetails = String(details).trim();
-
-    if (!normalizedClientId || !normalizedDetails) {
-      return res.status(400).json({ message: "Client ID and details are required" });
-    }
-
-    const client = await Client.findOne({ id: normalizedClientId });
-
-    const report = new ClientLocationReport({
-      clientId: normalizedClientId,
-      reporterName: reporterName ? String(reporterName).trim() : "",
-      details: normalizedDetails,
-      clientFound: Boolean(client),
-      clientSnapshot: client
-        ? {
-            id: client.id,
-            nombre: client.nombre,
-            location: client.location,
-            schedule: client.schedule,
-          }
-        : undefined,
-    });
-
-    await report.save();
-
-    res.status(201).json({
-      message: "Client location report registered successfully",
-      reportId: report._id,
-      clientFound: report.clientFound,
-    });
-  } catch (err) {
-    console.log("Error registrando denuncia de cliente:", err);
-    res.status(500).json({ message: "Error registering client location report" });
-  }
+  return require('./clientAddressCorrection.controllers').createRequest(req, res);
 };
 
-const listClientLocationReports = async (_req, res) => {
-  try {
-    const reports = await ClientLocationReport.find()
-      .sort({ createdAt: -1 })
-      .lean();
-
-    res.status(200).json({ reports });
-  } catch (err) {
-    console.log("Error obteniendo denuncias de clientes:", err);
-    res.status(500).json({ message: "Error getting client location reports" });
-  }
-};
+const listClientLocationReports = require('./clientAddressCorrection.controllers').listRequests;
 
 const deleteClientLocationReport = async (req, res) => {
   try {

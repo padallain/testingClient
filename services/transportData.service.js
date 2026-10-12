@@ -79,6 +79,7 @@ function normalizeTrip(input, route, configuration, existing = null) {
     configurationSnapshot: null, metricsSnapshot: null, closedAt: null };
   if (!result.zone || !result.routeCode) invalid('Zona y ruta comercial son obligatorias.');
   if (result.comparisonVehicleTypeId && !configuration.vehicleTypes.some((type) => type.id === result.comparisonVehicleTypeId)) invalid('Tipo para comparar desconocido.');
+  result.costOverrides = value.freightType === 'interno' ? normalizeCostOverrides(value.costOverrides) : null;
   if (value.freightType === 'externo') {
     const carrier = configuration.carriers.find((item) => item.id === value.carrierId);
     if (!carrier) invalid('Selecciona un transportista configurado.');
@@ -130,4 +131,15 @@ function normalizeTariff(tariff) {
   return result;
 }
 
-module.exports = { normalizeConfiguration, normalizeTrip, normalizeTariff, invalid };
+function normalizeCostOverrides(value) {
+  if (!value || value.enabled !== true) return null;
+  return {
+    enabled: true,
+    fixedDaily: money(numeric(value.fixedDaily, 'Costo fijo diario del viaje')),
+    variablePerKm: numeric(value.variablePerKm, 'Costo variable por km del viaje'),
+    coolingDaily: money(numeric(value.coolingDaily ?? 0, 'Equipo de frio diario del viaje')),
+    theoreticalKmPerLiter: numeric(value.theoreticalKmPerLiter, 'Rendimiento teorico km/l del viaje', { positive: true }),
+  };
+}
+
+module.exports = { normalizeConfiguration, normalizeTrip, normalizeTariff, normalizeCostOverrides, invalid };

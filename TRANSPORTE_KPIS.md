@@ -11,7 +11,11 @@ No se migran ni rellenan automaticamente los viajes antiguos.
 3. En crear ruta, activar **Datos de transporte del viaje**. Ingresar fecha operativa, vehiculo,
   zona y ruta comercial. El monto cargado procede de los pedidos de la guia. Esta pantalla
   usa solo planificacion: carga, capacidad, paradas previstas, tarifa y ayudante.
-  Los km estimados y viaticos presupuestados son opcionales y se guardan aparte de los reales.
+  En cada viaje propio se puede activar **Ajustar parametros de costo solo para este viaje**
+  para editar costo fijo diario, costo variable por km, equipo de frio diario y rendimiento
+  teorico km/l. Estos overrides quedan guardados en `TransportTrip.costOverrides`, se usan en
+  planificacion y liquidacion, y no modifican el tipo de vehiculo ni otros viajes. Sin override
+  se usa la configuracion general vigente del tipo de vehiculo.
 4. Usar **Estimar viaje** antes de salir. Supone devoluciones previstas cero y km estimados.
 5. Guardar el borrador sin datos de regreso. Completar devoluciones, km reales, viaticos,
    litros cargados, cantidades entregadas, paradas atendidas y horarios en **Operacion > Terminar ruta**.

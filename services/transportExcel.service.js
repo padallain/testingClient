@@ -15,11 +15,20 @@ async function buildWeeklyWorkbook(records, aggregates, configuration) {
     ['Devoluciones', 'returnRatio', 16], ['No atendidos', 'unattendedRatio', 16], ['Jornada h', 'hours', 14],
     ['Km/parada', 'kmPerStop', 14], ['Costo/km $', 'realCostPerKm', 16], ['Km/l cargado', 'fuelYield', 18],
     ['Km/l teorico', 'theoreticalFuelYield', 16], ['Viaticos $', 'allowances', 16], ['Alertas', 'alerts', 65],
+    ['Costo personalizado', 'costOverrideEnabled', 19], ['Fijo diario aplicado $', 'costOverrideFixedDaily', 22],
+    ['Variable por km aplicado $', 'costOverrideVariablePerKm', 25], ['Frio diario aplicado $', 'costOverrideCoolingDaily', 21],
+    ['Rendimiento teorico viaje km/l', 'costOverrideTheoreticalKmPerLiter', 27],
   ];
   sheet.columns = columns.map(([header, key, width]) => ({ header, key, width }));
-  for (const record of records) sheet.addRow({ ...record.trip, ...record.metrics, alerts: record.metrics.alerts.join(' | ') });
+  for (const record of records) sheet.addRow({ ...record.trip, ...record.metrics,
+    costOverrideEnabled: record.trip.costOverrides?.enabled ? 'Si' : 'No',
+    costOverrideFixedDaily: record.trip.costOverrides?.enabled ? record.trip.costOverrides.fixedDaily : null,
+    costOverrideVariablePerKm: record.trip.costOverrides?.enabled ? record.trip.costOverrides.variablePerKm : null,
+    costOverrideCoolingDaily: record.trip.costOverrides?.enabled ? record.trip.costOverrides.coolingDaily : null,
+    costOverrideTheoreticalKmPerLiter: record.trip.costOverrides?.enabled ? record.trip.costOverrides.theoreticalKmPerLiter : null,
+    alerts: record.metrics.alerts.join(' | ') });
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
-  sheet.autoFilter = `A1:AE${Math.max(1, sheet.rowCount)}`;
+  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(1, sheet.rowCount), column: columns.length } };
   for (const column of sheet.columns) {
     if (column.header.includes('$')) column.numFmt = '"$"#,##0.00';
     else if (['freightRatio', 'profitMargin', 'fillKg', 'fillPackages', 'returnRatio', 'unattendedRatio'].includes(column.key)) column.numFmt = '0.0%';
@@ -70,6 +79,9 @@ async function buildTripWorkbook(record) {
   };
   const detail = Object.entries(trip).filter(([, value]) => value == null || typeof value !== 'object' || value instanceof Date)
     .map(([key, value]) => ({ key, value: value instanceof Date ? value.toISOString() : value }));
+  if (trip.costOverrides?.enabled) {
+    for (const [key, value] of Object.entries(trip.costOverrides)) detail.push({ key: `Costo personalizado del viaje: ${key}`, value });
+  }
   detail.push({ key: 'Estado actual ruta', value: record.currentRouteStatus }, { key: 'Origen ruta', value: record.routeSource },
     { key: 'Origen incidencias', value: record.issuesSource });
   for (const [key, value] of Object.entries(metrics)) detail.push({ key: `KPI ${key}`, value: Array.isArray(value) ? value.join(' | ') : value });
@@ -88,7 +100,7 @@ async function buildTripWorkbook(record) {
   addRows('Paradas originales', stopColumns, stops(route?.originalStops));
   addRows('Clientes no encontrados', [['Cliente', 'clientId'], ['Resuelto', 'resolved'], ['Datos completos', 'data', 90]],
     (route?.missingClients || []).map(item => ({ ...item, data: JSON.stringify(item) })));
-  addRows('Devoluciones', [['Empresa', 'companyName', 35], ['Documento', 'orderNumber'], ['Cliente', 'clientId'], ['Nombre', 'clientName', 40], ['Sede', 'sucursal'],
+  addRows('Devoluciones', [['Empresa', 'companyName', 35], ['Documento', 'orderNumber'], ['Cliente', 'clientId'], ['Nombre', 'clientName', 40], ['Sede', 'sucursal'], ['Codigo producto', 'productCode', 22],
     ['Monto devuelto $', 'amount'], ['Kg', 'kg'], ['Bultos', 'packages'], ['Motivo', 'reason', 60]], (trip.returns || []).map(item => ({
       ...item, companyName: item.companyName || trip.guideSnapshot?.orders?.[item.orderIndex]?.companyName || 'Sin empresa registrada',
     })));

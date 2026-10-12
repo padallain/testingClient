@@ -48,21 +48,27 @@ function vehicleCosts(type) {
     theoreticalKmPerLiter: D(type.fuelKm).div(type.fuelLiters).toNumber(), coolingDaily: Number(type.coolingDaily) };
 }
 
-function ownCost(type, km, allowances) {
+function ownCost(type, km, allowances, overrides = null) {
   const costs = vehicleCosts(type);
-  return costs && known(km) && known(allowances)
-    ? money(D(costs.fixedDaily).plus(D(costs.variablePerKm).times(km)).plus(costs.coolingDaily).plus(allowances)) : null;
+  const fixedDaily = overrides?.enabled === true ? overrides.fixedDaily : costs?.fixedDaily;
+  const variablePerKm = overrides?.enabled === true ? overrides.variablePerKm : costs?.variablePerKm;
+  const coolingDaily = overrides?.enabled === true ? overrides.coolingDaily : costs?.coolingDaily;
+  return costs && known(fixedDaily) && known(variablePerKm) && known(coolingDaily) && known(km) && known(allowances)
+    ? money(D(fixedDaily).plus(D(variablePerKm).times(km)).plus(coolingDaily).plus(allowances)) : null;
 }
 
 function calculateTrip(trip, configuration) {
   const settings = configuration.settings;
   const type = configuration.vehicleTypes.find((item) => item.id === trip.vehicleTypeId);
   const tariff = trip.tariff || configuration.carriers.find((item) => item.id === trip.carrierId);
-  const costs = vehicleCosts(type);
+  const baseCosts = vehicleCosts(type);
+  const costs = baseCosts && trip.costOverrides?.enabled === true && known(trip.costOverrides.theoreticalKmPerLiter)
+    ? { ...baseCosts, theoreticalKmPerLiter: Number(trip.costOverrides.theoreticalKmPerLiter) }
+    : baseCosts;
   const sales = known(trip.loadedAmount) && known(trip.returnedAmount)
     ? money(D(trip.loadedAmount).minus(trip.returnedAmount)) : null;
   let cost = null;
-  if (trip.freightType === 'interno') cost = ownCost(type, trip.km, trip.allowances);
+  if (trip.freightType === 'interno') cost = ownCost(type, trip.km, trip.allowances, trip.costOverrides);
   if (trip.freightType === 'externo' && tariff && known(trip.allowances)) {
     const base = tariff.base === 'cargado' ? trip.loadedAmount : sales;
     if (tariff.mode === 'fijo' && known(tariff.fixed)) cost = money(D(tariff.fixed).plus(trip.allowances));

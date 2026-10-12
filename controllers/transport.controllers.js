@@ -4,7 +4,7 @@ const TransportTrip = require('../models/transportTrip.model');
 const RouteAssignment = require('../models/routeAssignment.model');
 const DispatchIssueReport = require('../models/dispatchIssueReport.model');
 const { defaultConfiguration, calculateTrip, compareTrip, aggregateTrips } = require('../services/transportKpi.service');
-const { normalizeConfiguration, normalizeTrip, normalizeTariff, invalid } = require('../services/transportData.service');
+const { normalizeConfiguration, normalizeTrip, normalizeTariff, normalizeCostOverrides, invalid } = require('../services/transportData.service');
 const { buildWeeklyWorkbook, buildTripWorkbook } = require('../services/transportExcel.service');
 
 async function configuration() {
@@ -199,6 +199,7 @@ exports.planTrip = handler(async (req, res) => {
   for (const key of ['km', 'loadedAmount', 'allowances']) if (body[key] == null || body[key] === '' || !Number.isFinite(Number(body[key])) || Number(body[key]) < 0) invalid(`${key}: dato no negativo requerido.`);
   const trip = { ...body, date: '2000-01-01', vehicleTypeId: vehicle?.vehicleTypeId,
     returnedAmount: 0, tariff: body.freightType === 'externo' ? normalizeTariff(body.tariff || carrier) : null,
+    costOverrides: body.freightType === 'interno' ? normalizeCostOverrides(body.costOverrides) : null,
     km: Number(body.km), loadedAmount: Number(body.loadedAmount), allowances: Number(body.allowances) };
   res.json({ metrics: calculateTrip(trip, config), comparison: compareTrip(trip, config),
     assumptions: ['Planificacion: km estimados y devoluciones previstas cero; no es un viaje ejecutado.'] });

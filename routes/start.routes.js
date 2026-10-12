@@ -23,6 +23,7 @@ const {
 } = require('../controllers/notifications.controllers');
 const { sendMissingDailyCheckReminderEmail } = require('../services/dailyCheckReminderService');
 const despachoRoutes = require('./despacho.routes');
+const addressCorrection = require('../controllers/clientAddressCorrection.controllers');
 const router = express.Router();
 
 router.use(express.json());
@@ -166,8 +167,10 @@ router.get('/countClients', countClients);
 router.get('/getClient/:id', getClient);
 router.get('/getClient/:id/sedes', getClientBranches);
 router.post('/internal/admin/clients/cleanup-duplicate-branches', requireAdminRole, requireAdminDeleteKey, cleanupDuplicateMainBranches);
-router.post('/clientLocationReports', createClientLocationReport);
-router.get('/clientLocationReports', listClientLocationReports);
+router.post('/clientLocationReports', addressCorrection.requireDriverOrAdmin, createClientLocationReport);
+router.get('/clientLocationReports', addressCorrection.requireDriverOrAdmin, listClientLocationReports);
+router.post('/clientLocationReports/:reportId/approve', requireAdminRole, addressCorrection.approveRequest);
+router.post('/clientLocationReports/:reportId/reject', requireAdminRole, addressCorrection.rejectRequest);
 router.get('/internal/admin/clientLocationReports', requireAdminRole, requireAdminDeleteKey, listClientLocationReports);
 router.delete('/internal/admin/clientLocationReports/:reportId', requireAdminRole, requireAdminDeleteKey, deleteClientLocationReport);
 router.delete('/internal/admin/deleteClient/:id', requireAdminRole, requireAdminDeleteKey, deleteClient);

@@ -85,6 +85,7 @@ test('Excel semanal valido con semaforo, datos de soporte y Arial', async () => 
   const Excel = require('exceljs');
   const value = trip({ guideNumber: 'EJEMPLO', vehicleId: 'TEST' });
   const records = [{ trip: value, metrics: calculateTrip(value, config) }];
+  records[0].trip.costOverrides = { enabled: true, fixedDaily: 50, variablePerKm: .3, coolingDaily: 5, theoreticalKmPerLiter: 5 };
   const workbook = await buildWeeklyWorkbook(records, aggregateTrips(records), config);
   const buffer = await workbook.xlsx.writeBuffer();
   const reread = new Excel.Workbook();
@@ -92,6 +93,8 @@ test('Excel semanal valido con semaforo, datos de soporte y Arial', async () => 
   assert.equal(reread.getWorksheet('Viajes').getCell('J2').value, 101.57);
   assert.equal(reread.getWorksheet('Viajes').getCell('J2').font.name, 'Arial');
   assert.ok(reread.getWorksheet('Viajes').conditionalFormattings.length);
+  assert.ok(reread.getWorksheet('Viajes').getRow(1).values.includes('Fijo diario aplicado $'));
+  assert.equal(reread.getWorksheet('Viajes').getCell(2, 33).value, 50);
   assert.equal(reread.worksheets.length, 3);
 });
 
@@ -148,6 +151,10 @@ test('REST: permisos, planificacion, cierre, filtros, conflictos y Excel', async
   const planning = await (await request('/planning', { freightType: 'externo', carrierId: 'maracaibo', km: 200, loadedAmount: 8500, allowances: 0,
     tariff: { mode: 'fijo', fixed: 190, percentage: 0, minimum: 0, base: 'entregado' } })).json();
   assert.equal(planning.metrics.cost, 190);
+  const customPlan = await (await request('/planning', { freightType: 'interno', vehicleId: 'test', km: 100,
+    loadedAmount: 5000, allowances: 10, costOverrides: { enabled: true, fixedDaily: 50, variablePerKm: .3,
+      coolingDaily: 5, theoreticalKmPerLiter: 5 } })).json();
+  assert.equal(customPlan.metrics.cost, 95);
   const input = { date: '2026-10-05', vehicleId: 'test', zone: 'Maracaibo', routeCode: 'R1', freightType: 'interno', km: 200, allowances: 0, returnedAmount: 0, status: 'draft' };
   const saved = await (await request(`/trips/${route._id}`, input, 'admin', 'PATCH')).json();
   assert.equal(saved.metrics.cost, 101.57);
@@ -196,7 +203,7 @@ test('REST: permisos, planificacion, cierre, filtros, conflictos y Excel', async
   route.status = 'active';
   const times = { departureAt: '2026-10-05T08:00:00-04:00', returnAt: '2026-10-05T16:00:00-04:00' };
   const delivery = { ...input, ...times, deliveryOutcome: 'con_devoluciones', returnedAmount: 79,
-    returns: [{ orderIndex: 0, amount: 79, reason: 'Rechazado' }] };
+    returns: [{ orderIndex: 0, productCode: 'HBL-900', amount: 79, reason: 'Rechazado' }] };
   issues = [{ routeId: route._id, orderNumber: 'TEST', clientId: 'CLIENTE', items: [{ productId: 'P1', novelty: 'Rechazo', quantity: 1 }] }];
   assert.equal((await request(`/trips/${route._id}/finish`, { ...delivery, returnedAmount: 80 })).status, 400);
   const withReturns = await (await request(`/trips/${route._id}/finish`, delivery)).json();
@@ -208,6 +215,11 @@ test('REST: permisos, planificacion, cierre, filtros, conflictos y Excel', async
   const frozen = await (await request(`/trips/${route._id}/export?format=json`)).json();
   assert.equal(frozen.issues.length, 1);
   assert.equal(frozen.trip.returns[0].amount, 79);
+  assert.equal(frozen.trip.returns[0].productCode, 'HBL-900');
+  const returnWorkbookResponse = await request(`/trips/${route._id}/export`);
+  const returnWorkbook = new Excel.Workbook();
+  await returnWorkbook.xlsx.load(Buffer.from(await returnWorkbookResponse.arrayBuffer()));
+  assert.equal(returnWorkbook.getWorksheet('Devoluciones').getCell('F2').value, 'HBL-900');
   storedTrip = null;
   route.status = 'active';
   failCompletion = true;
@@ -242,9 +254,10 @@ test('Liquidacion: sin novedad y devoluciones verificadas por pedido', () => {
   assert.equal(normalizeSettlement(clean, guide).returns.length, 0);
   assert.throws(() => normalizeSettlement({ ...clean, attendedStops: 0 }, guide), /paradas/);
   const partial = { deliveryOutcome: 'con_devoluciones', returnedAmount: 50,
-    returns: [{ orderIndex: 0, amount: 50, reason: 'Rechazado por cliente', kg: 10 }] };
+    returns: [{ orderIndex: 0, productCode: 'PROD-01', amount: 50, reason: 'Rechazado por cliente', kg: 10 }] };
   assert.equal(normalizeSettlement(partial, guide).returns[0].orderNumber, 'PEDIDO-1');
   assert.throws(() => normalizeSettlement({ ...partial, returnedAmount: 40 }, guide), /no coincide/);
+  assert.throws(() => normalizeSettlement({ ...partial, returns: [{ ...partial.returns[0], productCode: '' }] }, guide), /codigo del producto/);
   assert.throws(() => normalizeSettlement({ ...partial, returnedAmount: 600, returns: [{ ...partial.returns[0], amount: 600 }] }, guide), /supera/);
   assert.throws(() => normalizeSettlement({ ...partial, returns: [{ ...partial.returns[0], reason: '' }] }, guide), /motivo/);
   assert.throws(() => normalizeSettlement({ ...partial, loadedKg: 100, deliveredKg: 95 }, guide), /superan la carga/);
@@ -281,4 +294,30 @@ test('Estatus de despacho anuncia guia editable solo cuando existe', () => {
   assert.equal(buildRouteDispatchStatusSummary(base).hasLoadGuide, false);
   assert.equal(buildRouteDispatchStatusSummary({ ...base, loadGuide: { orders: [{ total: 10 }] } }).hasLoadGuide, true);
   assert.equal(buildRouteDispatchStatusSummary({ ...base, loadGuide: { orders: [] } }).hasLoadGuide, false);
+});
+
+test('Parametros excepcionales del viaje no alteran el modelo general', () => {
+  const special = trip({ costOverrides: { enabled: true, fixedDaily: 50, variablePerKm: .3,
+    coolingDaily: 5, theoreticalKmPerLiter: 5 }, km: 100, allowances: 10 });
+  const result = calculateTrip(special, config);
+  assert.equal(result.cost, 95);
+  assert.equal(result.minimumSales, 4750);
+  assert.equal(result.theoreticalFuelYield, 5);
+  assert.equal(calculateTrip(trip({ km: 100, allowances: 10 }), config).cost, 81.8);
+});
+
+test('Excepcion por viaje se valida y se conserva sin modificar configuracion', () => {
+  const { normalizeTrip } = require('./transportData.service');
+  const configuration = defaultConfiguration();
+  configuration.vehicles.push({ id: 'OVERRIDE', name: 'Camion especial', vehicleTypeId: 'camion', capacityKg: 5000, capacityPackages: null });
+  const route = { _id: '507f1f77bcf86cd799439042', driverId: 'PRUEBA', routeLabel: 'COSTO-ESPECIAL',
+    loadGuide: { orders: [{ total: 10000 }] }, stops: [{ dispatched: false }] };
+  const value = { date: '2026-10-08', vehicleId: 'OVERRIDE', zone: 'Maracaibo', routeCode: 'ESPECIAL',
+    freightType: 'interno', km: 100, allowances: 10, returnedAmount: 0,
+    costOverrides: { enabled: true, fixedDaily: 50, variablePerKm: .3, coolingDaily: 5, theoreticalKmPerLiter: 5 } };
+  const normalized = normalizeTrip(value, route, configuration);
+  assert.equal(calculateTrip(normalized, configuration).cost, 95);
+  assert.equal(normalized.costOverrides.enabled, true);
+  assert.equal(configuration.vehicleTypes.find(type => type.id === 'camion').fuelPrice, .7);
+  assert.throws(() => normalizeTrip({ ...value, costOverrides: { ...value.costOverrides, variablePerKm: -1 } }, route, configuration), /no negativo/);
 });

@@ -24,6 +24,7 @@ const schema = new mongoose.Schema({
   carrierId: { type: String, default: '', index: true },
   carrierName: { type: String, default: '' },
   tariff: { type: mongoose.Schema.Types.Mixed, default: null },
+  costOverrides: { type: mongoose.Schema.Types.Mixed, default: null },
   comparisonVehicleTypeId: { type: String, default: '' },
   loadedAmount: { type: Number, required: true, min: 0 },
   returnedAmount: optionalNumber,

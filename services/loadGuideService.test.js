@@ -218,7 +218,7 @@ test('Liquidacion y Excel identifican empresas aunque el documento coincida', as
   const { defaultConfiguration, calculateTrip } = require('./transportKpi.service');
   const guide = normalizeLoadGuide({ orders: [{ ...order, companyId: companies[0]._id }, { ...order, companyId: companies[1]._id }] }, stops, options);
   const settlement = normalizeSettlement({ deliveryOutcome: 'con_devoluciones', returnedAmount: 10,
-    returns: [{ orderIndex: 1, amount: 10, reason: 'Rechazado' }] }, guide);
+    returns: [{ orderIndex: 1, productCode: 'CHI-002', amount: 10, reason: 'Rechazado' }] }, guide);
   assert.equal(settlement.returns[0].companyName, 'Empresa B');
   const configuration = defaultConfiguration();
   const trip = { ...settlement, guideSnapshot: guide, returnedAmount: 10, loadedAmount: 200, allowances: 0,
