@@ -48,7 +48,7 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   let savedAssignment;
   const methods = [[Company, 'find'], [Company, 'create'], [Company, 'findById'], [Settings, 'findById'],
     [Settings, 'findByIdAndUpdate'], [User, 'findById'], [Client, 'find'], [Assignment.prototype, 'save'], [planning, 'buildRouteOptions'],
-    [Assignment, 'findById'], [Assignment, 'findOneAndUpdate'], [Trips, 'findOne'], [planning, 'calculateRouteDistance']];
+    [Assignment, 'findById'], [Assignment, 'findOne'], [Assignment, 'findOneAndUpdate'], [Trips, 'findOne'], [planning, 'calculateRouteDistance']];
   const originals = methods.map(([object, method]) => object[method]);
   context.after(() => methods.forEach(([object, method], index) => { object[method] = originals[index]; }));
   Company.find = () => ({ sort: () => ({ lean: async () => structuredClone(catalog) }) });
@@ -77,6 +77,17 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   Assignment.prototype.save = async function () { if (!savedAssignment || String(savedAssignment._id) !== String(this._id)) createdCount += 1;
     this.updatedAt = new Date(); savedAssignment = this.toObject(); return this; };
   Assignment.findById = () => ({ lean: async () => savedAssignment, then: resolve => resolve(new Assignment(savedAssignment)) });
+  Assignment.findOne = query => ({ lean: async () => {
+    const conditions = query.$or || [query];
+    const matched = conditions.some(condition => {
+      const guideMatch = condition['loadGuide.subGuides']?.$elemMatch;
+      if (guideMatch) return savedAssignment?.loadGuide?.subGuides?.some(guide => guide.companyId === guideMatch.companyId
+        && guide.numberKey === guideMatch.numberKey);
+      return savedAssignment?.loadGuide?.companyId === condition['loadGuide.companyId']
+        && savedAssignment?.loadGuide?.numberKey === condition['loadGuide.numberKey'];
+    });
+    return matched ? savedAssignment : null;
+  } });
   planning.calculateRouteDistance = async () => 10;
   Assignment.findOneAndUpdate = (query, update) => ({ lean: async () => {
     if (new Date(query.updatedAt).getTime() !== new Date(savedAssignment.updatedAt).getTime()) return null;
@@ -112,13 +123,28 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   assert.equal((await request('/dispatch-companies', { name: ' empresa   a ' })).status, 409);
   const second = await (await request('/dispatch-companies/default', { companyId: companies[1]._id }, 'admin', 'PUT')).json();
   assert.equal(second.defaultCompanyId, companies[1]._id);
-  const payload = { driverId: 'PRUEBA', stops, routeWeight: 100, loadGuide: { orders: [order] } };
+  const payload = { driverId: 'PRUEBA', stops, routeWeight: 100,
+    loadGuide: { number: '1', companyId: companies[1]._id, orders: [order] } };
   const result = await (await request('/makeRoute', payload)).json();
   assert.equal(result.savedRoute.loadGuide.orders[0].companyName, 'Empresa B');
+  assert.equal(result.savedRoute.loadGuide.number, '1');
   assert.equal(savedAssignment.loadGuide.orders[0].companyId, companies[1]._id);
+  const firstId = String(savedAssignment._id);
+  const firstCount = createdCount;
+  const repeat = await (await request('/makeRoute', { ...payload, driverName: 'Actualizado' })).json();
+  assert.equal(String(repeat.savedRoute.routeId), firstId);
+  assert.equal(repeat.updated, true);
+  assert.equal(createdCount, firstCount);
+  const otherCompany = { ...payload, loadGuide: { number: '1', companyId: companies[0]._id,
+    orders: [{ ...order, companyId: companies[0]._id }] } };
+  assert.equal((await request('/makeRoute', otherCompany)).status, 200);
+  assert.notEqual(String(savedAssignment._id), firstId);
+  assert.equal(createdCount, firstCount + 1);
   const mixed = { ...payload, loadGuide: { orders: [{ ...order, companyId: companies[0]._id }, { ...order, companyId: companies[1]._id }] } };
-  assert.equal((await request('/makeRoute', mixed)).status, 200);
-  assert.equal(savedAssignment.loadGuide.orders.length, 2);
+  assert.equal((await request('/makeRoute', mixed)).status, 400);
+  const mismatchedCompany = { ...payload, loadGuide: { number: '2', companyId: companies[0]._id,
+    orders: [{ ...order, companyId: companies[1]._id }] } };
+  assert.equal((await request('/makeRoute', mismatchedCompany)).status, 400);
   assert.equal((await request('/makeRoute', { ...payload, loadGuide: { orders: [{ ...order, companyId: 'unknown' }] } })).status, 400);
   const existingId = String(savedAssignment._id);
   const existingNumber = savedAssignment.loadGuide.number;
@@ -126,7 +152,8 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   const creationsBeforeUpdate = createdCount;
   currentClients = [{ ...client, sucursal: 'Norte' }, { ...client, sucursal: 'Sur' }];
   const update = { ...payload, updatedAt: savedAssignment.updatedAt, stops: currentClients.map(item => ({ clientId: item.id, sucursal: item.sucursal })),
-    loadGuide: { orders: currentClients.map(item => ({ ...order, sucursal: item.sucursal })) } };
+    loadGuide: { number: '1', companyId: companies[0]._id,
+      orders: currentClients.map(item => ({ ...order, companyId: companies[0]._id, sucursal: item.sucursal })) } };
   const response = await request(`/driver-routes/${existingId}/guide`, update, 'admin', 'PATCH');
   assert.equal(response.status, 200);
   const updated = await response.json();
@@ -210,6 +237,20 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   assert.equal(cleanedSave.route.stops.length, 2);
   assert.equal(cleanedSave.route.loadGuide.orders.length, 3);
   assert.equal(cleanedSave.route.stops[1].sucursal, 'OJEDA');
+  currentClients = [client];
+  const multipleGuides = { driverId: 'PRUEBA', stops, routeWeight: 100, loadGuide: { subGuides: [
+    { companyId: companies[0]._id, number: '1', orders: [{ ...order, companyId: companies[0]._id }] },
+    { companyId: companies[1]._id, number: '1', orders: [{ ...order, companyId: companies[1]._id }] },
+  ] } };
+  const multiple = await (await request('/makeRoute', multipleGuides)).json();
+  assert.equal(multiple.savedRoute.loadGuide.subGuides.length, 2);
+  assert.deepEqual(multiple.savedRoute.loadGuide.subGuides.map(guide => guide.number), ['1', '1']);
+  assert.equal(multiple.savedRoute.loadGuide.number, '1, 1');
+  assert.equal(multiple.savedRoute.loadGuide.orders.length, 2);
+  const multiRouteId = String(multiple.savedRoute.routeId);
+  const repeatedMultiple = await (await request('/makeRoute', multipleGuides)).json();
+  assert.equal(String(repeatedMultiple.savedRoute.routeId), multiRouteId);
+  assert.equal(repeatedMultiple.updated, true);
 });
 
 test('Liquidacion y Excel identifican empresas aunque el documento coincida', async () => {

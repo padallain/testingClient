@@ -67,4 +67,9 @@ const routeAssignmentSchema = new mongoose.Schema(
   },
 );
 
+routeAssignmentSchema.index(
+  { 'loadGuide.subGuides.companyId': 1, 'loadGuide.subGuides.numberKey': 1 },
+  { unique: true, partialFilterExpression: { 'loadGuide.subGuides.companyId': { $type: 'string' }, 'loadGuide.subGuides.numberKey': { $type: 'string' } } },
+);
+
 module.exports = mongoose.model('RouteAssignment', routeAssignmentSchema);

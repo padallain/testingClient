@@ -682,7 +682,7 @@ const buildMonthlyAnalyticsHistory = (routes, selectedMonthStart) => {
 
 const makeRoute = async (req, res) => {
   try {
-    const updatingId = req.params?.routeId;
+    let updatingId = req.params?.routeId;
     let existingAssignment = null;
     if (updatingId) {
       if (!require('mongoose').isValidObjectId(updatingId)) return res.status(400).json({ message: 'Folio de guia invalido.' });
@@ -715,12 +715,36 @@ const makeRoute = async (req, res) => {
     const companyCatalog = req.body.loadGuide ? await loadDispatchCompanies() : {};
     let loadGuide = null;
     try {
-      loadGuide = normalizeLoadGuide(req.body.loadGuide, uniqueStops, { ...companyCatalog, requireCompany: true });
+      loadGuide = normalizeLoadGuide(req.body.loadGuide, uniqueStops, { ...companyCatalog, requireCompany: true, requireGuideIdentity: true });
     } catch (error) {
       return res.status(400).json({ message: error.message });
     }
     if (loadGuide && !String(driverId || '').trim()) {
       return res.status(400).json({ message: "Ingresa el ID del chofer para guardar la ruta y sus pedidos." });
+    }
+    if (loadGuide) {
+      const matches = new Map();
+      for (const guide of loadGuide.subGuides) {
+        const match = await RouteAssignment.findOne({ $or: [
+          { 'loadGuide.subGuides': { $elemMatch: { companyId: guide.companyId, numberKey: guide.numberKey } } },
+          { 'loadGuide.companyId': guide.companyId, 'loadGuide.numberKey': guide.numberKey },
+        ] }).lean();
+        if (match) matches.set(String(match._id), match);
+      }
+      if (updatingId && [...matches.keys()].some(id => id !== String(updatingId))) {
+        return res.status(409).json({ message: 'Una guia con esa empresa y numero ya pertenece a otra ruta.' });
+      }
+      if (!updatingId && matches.size > 1) {
+        return res.status(409).json({ message: 'Las guias indicadas ya pertenecen a rutas distintas. Edita cada ruta por separado.' });
+      }
+      if (!updatingId && matches.size === 1) {
+        existingAssignment = [...matches.values()][0];
+        updatingId = String(existingAssignment._id);
+        const trip = await TransportTrip.findOne({ routeId: updatingId }).lean();
+        if (existingAssignment.status === 'completed' || trip?.status === 'closed') {
+          return res.status(409).json({ message: 'Esta guia ya existe y esta terminada o liquidada; no se puede actualizar.' });
+        }
+      }
     }
     if (updatingId && !loadGuide) return res.status(400).json({ message: 'Incluye los pedidos de la guia que quieres actualizar.' });
 
@@ -759,11 +783,13 @@ const makeRoute = async (req, res) => {
       return res.status(400).json({ message: "Todos los clientes de la guia deben existir en la ruta.", notFoundIds });
     }
     if (loadGuide) {
-      loadGuide.orders = loadGuide.orders.map((order) => {
+      const enrichOrder = order => {
         const client = clients.find((current) => String(current.id) === order.clientId
           && (!order.sucursal || String(current.sucursal || '') === order.sucursal));
         return { ...order, clientName: client.sucursal ? `${client.nombre} - ${client.sucursal}` : client.nombre };
-      });
+      };
+      loadGuide.orders = loadGuide.orders.map(enrichOrder);
+      loadGuide.subGuides = loadGuide.subGuides.map(guide => ({ ...guide, orders: guide.orders.map(enrichOrder) }));
     }
     const uniqueIds = uniqueStops.map((stop) => stop.clientId);
     const explicitRouteOrder = preserveRouteOrder
@@ -874,17 +900,22 @@ const makeRoute = async (req, res) => {
       if (existingAssignment) assignment.routeLabel = existingAssignment.routeLabel;
 
       if (loadGuide) {
-        assignment.loadGuide = { ...loadGuide, number: existingAssignment?.loadGuide?.number || assignment.routeLabel,
+        assignment.loadGuide = { ...loadGuide, number: loadGuide.number || existingAssignment?.loadGuide?.number || assignment.routeLabel,
           date: existingAssignment?.loadGuide?.date || new Date().toISOString().slice(0, 10) };
       }
 
-      if (existingAssignment) {
-        const updated = assignment.toObject();
-        for (const field of ['_id', '__v', 'createdAt', 'updatedAt', 'wasDriverModified', 'driverModifiedAt']) delete updated[field];
-        assignment = await RouteAssignment.findOneAndUpdate({ _id: updatingId, status: 'active', updatedAt: existingAssignment.updatedAt },
-          { $set: updated }, { new: true, runValidators: true }).lean();
-        if (!assignment) return res.status(409).json({ message: 'La guia fue modificada por otra solicitud. Recarga antes de guardar.' });
-      } else await assignment.save();
+      try {
+        if (existingAssignment) {
+          const updated = assignment.toObject();
+          for (const field of ['_id', '__v', 'createdAt', 'updatedAt', 'wasDriverModified', 'driverModifiedAt']) delete updated[field];
+          assignment = await RouteAssignment.findOneAndUpdate({ _id: updatingId, status: 'active', updatedAt: existingAssignment.updatedAt },
+            { $set: updated }, { new: true, runValidators: true }).lean();
+          if (!assignment) return res.status(409).json({ message: 'La guia fue modificada por otra solicitud. Recarga antes de guardar.' });
+        } else await assignment.save();
+      } catch (error) {
+        if (error?.code === 11000) return res.status(409).json({ message: 'Ya existe una guia con ese numero para una de las empresas seleccionadas.' });
+        throw error;
+      }
 
       savedRoute = {
         routeId: assignment._id,

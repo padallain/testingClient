@@ -1,20 +1,21 @@
 # Empresas por pedido en guias de carga
 
-En **Crear ruta**, seleccionar **Empresa del pedido** antes de agregar al cliente.
+En **Crear ruta**, seleccionar la empresa antes de agregar pedidos.
 El boton **+** permite registrar una empresa. La primera empresa queda como predeterminada;
 las siguientes solo cambian la predeterminada si se marca **Usar como predeterminada** o se
 pulsa el boton de estrella junto al selector.
 
 La predeterminada es compartida por el sistema y se guarda en MongoDB, no en el navegador.
-Al agregar un pedido, el selector vuelve a la predeterminada para el siguiente pedido.
-Cada fila conserva su propia empresa y permite cambiarla antes de guardar la guia.
-Cambiar la predeterminada no cambia filas ya agregadas ni guias anteriores.
+La empresa elegida se conserva al agregar pedidos. Cambiar la predeterminada no cambia
+pedidos ya agregados ni guias anteriores. Una ruta puede tener una lista de pedidos por
+empresa y cada lista tiene su propio numero de guia.
 
 ## Datos y compatibilidad
 
 - Catalogo: coleccion `dispatchcompanies`, con nombre e identificador.
 - Predeterminada: documento `default` de `dispatchcompanysettings`.
-- Pedidos: `RouteAssignment.loadGuide.orders[].companyId` y `companyName`.
+- Pedidos agregados: `RouteAssignment.loadGuide.orders[].companyId` y `companyName`.
+- Guias por empresa: `RouteAssignment.loadGuide.subGuides[]`, con empresa, numero y pedidos.
 - El nombre historico se copia del catalogo en el backend; no se confia en nombres enviados
   por el navegador. No hay migracion ni asignacion automatica a guias antiguas.
 - Dos empresas pueden tener el mismo documento y cliente en una guia mixta. Se rechaza
@@ -34,9 +35,10 @@ Todas estas rutas requieren sesion/token y rol administrador:
 | POST | /dispatch-companies | Crear con name y makeDefault opcional |
 | PUT | /dispatch-companies/default | Seleccionar predeterminada con companyId |
 
-`POST /makeRoute` acepta `loadGuide.orders[].companyId`. Si falta, usa la predeterminada
-actual solo para ese pedido nuevo. Si no hay predeterminada o el ID no existe, rechaza
-el pedido con un error explicito. Los nombres duplicados se detectan sin diferencias
+`POST /makeRoute` acepta `loadGuide.subGuides[]`, cada elemento con `companyId`, `number`
+y sus `orders`. El mismo numero se permite en empresas distintas; repetir empresa y numero
+actualiza esa ruta existente. Los numeros y pedidos se conservan en listas independientes.
+Los nombres duplicados se detectan sin diferencias
 de mayusculas, espacios consecutivos o formas Unicode equivalentes.
 
 ## Verificacion
@@ -49,7 +51,7 @@ Reiniciar/publicar backend y frontend antes de registrar empresas reales.
 
 Despues del primer guardado, el boton cambia a **Actualizar guia**. Agregar pedidos o
 clientes y guardar actualiza el mismo folio por PATCH `/driver-routes/:routeId/guide`.
-La fecha original y numero de guia se conservan. Los clientes nuevos se combinan con
+La fecha original y los numeros de guia de cada empresa se conservan. Los clientes nuevos se combinan con
 el orden vigente y los clientes eliminados dejan de formar parte de la guia.
 
 El folio queda en la URL (`/routes?guideId=...`) para continuar la edicion al recargar.
