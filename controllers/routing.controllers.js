@@ -682,6 +682,7 @@ const buildMonthlyAnalyticsHistory = (routes, selectedMonthStart) => {
 
 const makeRoute = async (req, res) => {
   try {
+    const updatingExistingRoute = Boolean(req.params?.routeId);
     let updatingId = req.params?.routeId;
     let existingAssignment = null;
     if (updatingId) {
@@ -743,6 +744,24 @@ const makeRoute = async (req, res) => {
         const trip = await TransportTrip.findOne({ routeId: updatingId }).lean();
         if (existingAssignment.status === 'completed' || trip?.status === 'closed') {
           return res.status(409).json({ message: 'Esta guia ya existe y esta terminada o liquidada; no se puede actualizar.' });
+        }
+        if (!updatingExistingRoute && Array.isArray(existingAssignment.loadGuide?.subGuides)) {
+          const incomingCompanies = new Set(loadGuide.subGuides.map(guide => guide.companyId));
+          const preservedGuides = existingAssignment.loadGuide.subGuides.filter(guide => !incomingCompanies.has(guide.companyId));
+          if (preservedGuides.length) {
+            const mergedGuides = [...preservedGuides, ...loadGuide.subGuides];
+            const stopKeys = new Set(uniqueStops.map(stop => JSON.stringify([String(stop.clientId), String(stop.sucursal || '')])));
+            for (const stop of existingAssignment.stops || []) {
+              const key = JSON.stringify([String(stop.clientId), String(stop.sucursal || '')]);
+              if (!stopKeys.has(key)) { uniqueStops.push({ clientId: stop.clientId, sucursal: stop.sucursal || '' }); stopKeys.add(key); }
+            }
+            try {
+              loadGuide = normalizeLoadGuide({ subGuides: mergedGuides }, uniqueStops,
+                { ...companyCatalog, requireCompany: true, requireGuideIdentity: true });
+            } catch (error) {
+              return res.status(409).json({ message: `No se pudo combinar la guia con las listas existentes: ${error.message}` });
+            }
+          }
         }
       }
     }

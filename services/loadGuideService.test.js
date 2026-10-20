@@ -251,6 +251,24 @@ test('REST: empresas persistidas, default y guia mixta en makeRoute', async cont
   const repeatedMultiple = await (await request('/makeRoute', multipleGuides)).json();
   assert.equal(String(repeatedMultiple.savedRoute.routeId), multiRouteId);
   assert.equal(repeatedMultiple.updated, true);
+  const repeatedCompanyGuide = await (await request('/makeRoute', { ...multipleGuides,
+    loadGuide: { subGuides: [multipleGuides.loadGuide.subGuides[0]] } })).json();
+  assert.equal(String(repeatedCompanyGuide.savedRoute.routeId), multiRouteId);
+  assert.deepEqual(repeatedCompanyGuide.savedRoute.loadGuide.subGuides.map(guide => guide.companyId).sort(),
+    [companies[0]._id, companies[1]._id].sort());
+  const beforeRouteCalculation = createdCount;
+  const routeOnlyResponse = await request('/makeRoute', { ids: ['CLIENTE'] });
+  assert.equal(routeOnlyResponse.status, 200);
+  const routeOnly = await routeOnlyResponse.json();
+  assert.equal(routeOnly.savedRoute, null);
+  assert.equal(routeOnly.route[0].id, 'CLIENTE');
+  assert.equal(createdCount, beforeRouteCalculation);
+  const assignedRouteResponse = await request('/makeRoute', { ids: ['CLIENTE'], driverId: 'SOLO-RUTA' });
+  assert.equal(assignedRouteResponse.status, 200);
+  const assignedRoute = await assignedRouteResponse.json();
+  assert.equal(assignedRoute.savedRoute.driverId, 'SOLO-RUTA');
+  assert.equal(assignedRoute.savedRoute.loadGuide, null);
+  assert.equal(createdCount, beforeRouteCalculation + 1);
 });
 
 test('Liquidacion y Excel identifican empresas aunque el documento coincida', async () => {
