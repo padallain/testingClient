@@ -6,7 +6,9 @@ Los antiguos `/report-client-location` y `/client-location-reports` redirigen al
 ## Chofer
 
 1. Buscar RIF/ID del cliente y seleccionar la sede cuando tenga varias.
-2. Verificar el punto registrado y proponer latitud/longitud correctas. El boton GPS toma
+2. Indicar el nombre de sede propuesto si aparece como Principal o hay que corregirlo.
+   Se puede cambiar solo la sede conservando las coordenadas registradas. El nombre vacio indica Principal.
+   Verificar el punto registrado y proponer latitud/longitud correctas. El boton GPS toma
    la ubicacion del dispositivo: usarlo estando en la direccion correcta.
 3. Escribir direccion/referencia y motivo, y pulsar **Solicitar arreglo**.
 4. Consultar Mis solicitudes: pendientes, aprobadas o rechazadas.
@@ -18,8 +20,9 @@ no acepta un nombre de reportante elegido por el solicitante. Un chofer solo ve 
 
 En el mismo modulo se muestran todas las solicitudes. Comparar punto original/propuesto,
 revisar el motivo y aprobar o rechazar. Para rechazar, el motivo es obligatorio.
-La aprobacion actualiza solo `Client.location` del documento de la sede elegida, sin
+La aprobacion actualiza `Client.location` y, si se propone, `Client.sucursal` del documento elegido, sin
 eliminar el cliente, cambiar RIF, horario, otras sedes ni reescribir rutas ya guardadas.
+El historial y la confirmacion muestran la sede propuesta. No se permite usar el nombre de otra sede del mismo cliente.
 Las rutas futuras utilizan el punto actualizado; rutas existentes conservan su snapshot.
 
 La decision registra usuario y fecha, mantiene punto anterior y propuesta, y no admite
@@ -42,7 +45,7 @@ aplicar cambios parciales. No se modifica la infraestructura automaticamente.
 
 ## API
 
-- POST `/clientLocationReports`: clientId, sucursal, details, proposedLocation (latitude/longitude), accuracyMeters opcional.
+- POST `/clientLocationReports`: clientId, sucursal actual, details, proposedLocation (latitude/longitude), accuracyMeters y proposedSucursal opcionales.
 - GET `/clientLocationReports?status=pending`: pending/approved/rejected/all; legacy disponible para historial admin.
 - POST `/clientLocationReports/:reportId/approve`: reviewNote opcional.
 - POST `/clientLocationReports/:reportId/reject`: reviewNote obligatorio.

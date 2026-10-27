@@ -7,6 +7,7 @@ const clientLocationReportSchema = new mongoose.Schema(
     reporterId: { type: String, default: '', trim: true, index: true },
     targetClientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', default: null },
     sucursal: { type: String, default: '', trim: true },
+    proposedSucursal: { type: String, trim: true, maxlength: 120 },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
     proposedLocation: {
       latitude: { type: Number, min: -90, max: 90 },

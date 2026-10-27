@@ -18,6 +18,16 @@ test('No se aceptan puntos vacios, invalidos ni reportes antiguos para aprobar',
   assert.equal(canReviewCorrection({ targetClientId: 'client', proposedLocation: valid.proposedLocation }), true);
 });
 
+test('El nombre de sede es opcional, se normaliza y se valida', () => {
+  const input = { details: 'Cambiar sede', proposedLocation: { latitude: 10, longitude: -71 } };
+  assert.equal(Object.hasOwn(normalizeCorrectionProposal(input), 'proposedSucursal'), false);
+  assert.equal(normalizeCorrectionProposal({ ...input, proposedSucursal: '  Centro  ' }).proposedSucursal, 'Centro');
+  assert.equal(normalizeCorrectionProposal({ ...input, proposedSucursal: '' }).proposedSucursal, '');
+  for (const proposedSucursal of [null, 42, 'S'.repeat(121)]) {
+    assert.throws(() => normalizeCorrectionProposal({ ...input, proposedSucursal }), /sede invalido/);
+  }
+});
+
 test('REST: chofer solicita; admin aprueba/rechaza; historial y conflictos', async context => {
   const express = require('express');
   const mongoose = require('mongoose');
@@ -41,7 +51,11 @@ test('REST: chofer solicita; admin aprueba/rechaza; historial y conflictos', asy
     [Report, 'create'], [Report, 'findOneAndUpdate'], [User, 'findById'], [mongoose, 'startSession']];
   const originals = methods.map(([owner, key]) => owner[key]);
   context.after(() => methods.forEach(([owner, key], index) => { owner[key] = originals[index]; }));
-  Client.find = query => ({ lean: async () => structuredClone(clients.filter(item => matches(item, query))) });
+  Client.find = query => {
+    const result = { lean: async () => structuredClone(clients.filter(item => matches(item, query))) };
+    result.session = () => result;
+    return result;
+  };
   Client.findOneAndUpdate = (query, update) => ({ lean: async () => {
     const client = clients.find(item => matches(item, query)); if (!client) return null;
     Object.assign(client, update.$set); return structuredClone(client);
@@ -110,4 +124,21 @@ test('REST: chofer solicita; admin aprueba/rechaza; historial y conflictos', asy
   assert.equal((await request(`/requests/${transactional.reportId}/approve`, {}, 'admin')).status, 500);
   assert.deepEqual(clients[0].location, before);
   assert.equal(reports.find(item => item._id === transactional.reportId).status, 'pending');
+  failReportWrite = false;
+  clients[0].sucursal = '';
+  const renameBody = { ...body, sucursal: '', proposedSucursal: 'Centro', proposedLocation: structuredClone(clients[0].location) };
+  const renamedRequest = await (await request('/requests', renameBody)).json();
+  assert.equal(renamedRequest.report.proposedSucursal, 'Centro');
+  assert.equal(clients[0].sucursal, '');
+  assert.equal((await request('/requests', renameBody)).status, 409);
+  assert.equal((await request('/requests', { ...renameBody, proposedSucursal: 'sur' })).status, 409);
+  clients[1].sucursal = 'Centro';
+  assert.equal((await request(`/requests/${renamedRequest.reportId}/approve`, {}, 'admin')).status, 409);
+  assert.equal(clients[0].sucursal, '');
+  clients[1].sucursal = 'Sur';
+  const renamed = await (await request(`/requests/${renamedRequest.reportId}/approve`, {}, 'admin')).json();
+  assert.equal(renamed.report.status, 'approved');
+  assert.equal(clients[0].sucursal, 'Centro');
+  assert.deepEqual(clients[0].location, renameBody.proposedLocation);
+  assert.equal(clients[1].sucursal, 'Sur');
 });

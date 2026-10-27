@@ -9,6 +9,7 @@ const handler = action => async (req, res) => {
   try { await action(req, res); }
   catch (error) {
     console.error('[address-correction]', error.message);
+    if (error.code === 11000) return res.status(409).json({ message: 'Ya existe una sede con ese nombre para este cliente.' });
     res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : 'No se pudo procesar la solicitud de direccion.' });
   }
 };
@@ -27,16 +28,22 @@ exports.createRequest = handler(async (req, res) => {
   const selected = hasBranch ? matches.find(client => text(client.sucursal) === sucursal) : matches[0];
   if (!selected) throw correctionError('La sede seleccionada no existe.', 404);
   if (!Number.isFinite(selected.location?.latitude) || !Number.isFinite(selected.location?.longitude)) throw correctionError('El cliente no tiene un punto actual valido para comparar.');
-  if (selected.location.latitude === proposal.proposedLocation.latitude && selected.location.longitude === proposal.proposedLocation.longitude) throw correctionError('La ubicacion propuesta es igual a la registrada.');
+  const branchChanged = proposal.proposedSucursal !== undefined && proposal.proposedSucursal !== text(selected.sucursal);
+  if (branchChanged && matches.some(client => String(client._id) !== String(selected._id)
+    && text(client.sucursal).toLowerCase() === proposal.proposedSucursal.toLowerCase())) {
+    throw correctionError('Ya existe una sede con ese nombre para este cliente.', 409);
+  }
+  if (!branchChanged && selected.location.latitude === proposal.proposedLocation.latitude && selected.location.longitude === proposal.proposedLocation.longitude) throw correctionError('La ubicacion y la sede propuestas son iguales a las registradas.');
   const reporter = actor(req.user);
   const duplicate = await Report.findOne({ targetClientId: selected._id, reporterId: reporter.id, status: 'pending',
+    ...(proposal.proposedSucursal !== undefined ? { proposedSucursal: proposal.proposedSucursal } : {}),
     'proposedLocation.latitude': proposal.proposedLocation.latitude, 'proposedLocation.longitude': proposal.proposedLocation.longitude }).lean();
   if (duplicate) throw correctionError('Ya tienes una solicitud pendiente para ese punto y sede.', 409);
   const report = await Report.create({ clientId: selected.id, targetClientId: selected._id, sucursal: text(selected.sucursal),
     reporterId: reporter.id, reporterName: reporter.name, clientFound: true, status: 'pending', ...proposal,
     clientSnapshot: { id: selected.id, nombre: selected.nombre, sucursal: text(selected.sucursal), location: selected.location, schedule: selected.schedule } });
   res.status(201).json({ report: reportView(report.toObject()), reportId: report._id,
-    message: 'Solicitud enviada. La ubicacion del cliente no cambia hasta que el administrador la apruebe.' });
+    message: 'Solicitud enviada. La ubicacion y la sede no cambian hasta que el administrador la apruebe.' });
 });
 
 exports.listRequests = handler(async (req, res) => {
@@ -73,10 +80,19 @@ exports.approveRequest = handler(async (req, res) => {
       if (!report) throw correctionError('Solicitud no encontrada.', 404);
       if (!canReviewCorrection(report)) throw correctionError('Este reporte antiguo no tiene una ubicacion propuesta. Se conserva como historial.', 409);
       if (report.status !== 'pending') throw correctionError('La solicitud ya fue revisada.', 409);
-      const proposal = normalizeCorrectionProposal({ details: report.details, proposedLocation: report.proposedLocation, accuracyMeters: report.accuracyMeters });
+      const proposal = normalizeCorrectionProposal({ details: report.details, proposedLocation: report.proposedLocation,
+        accuracyMeters: report.accuracyMeters, proposedSucursal: report.proposedSucursal });
+      if (proposal.proposedSucursal !== undefined && proposal.proposedSucursal !== text(report.sucursal)) {
+        const branches = await Client.find({ id: report.clientId }).session(session).lean();
+        if (branches.some(client => String(client._id) !== String(report.targetClientId)
+          && text(client.sucursal).toLowerCase() === proposal.proposedSucursal.toLowerCase())) {
+          throw correctionError('Ya existe una sede con ese nombre para este cliente.', 409);
+        }
+      }
       updatedClient = await Client.findOneAndUpdate({ _id: report.targetClientId, id: report.clientId, sucursal: report.sucursal || '',
         'location.latitude': report.clientSnapshot.location.latitude, 'location.longitude': report.clientSnapshot.location.longitude },
-      { $set: { location: proposal.proposedLocation } }, { session, new: true, runValidators: true }).lean();
+      { $set: { location: proposal.proposedLocation,
+        ...(proposal.proposedSucursal !== undefined ? { sucursal: proposal.proposedSucursal } : {}) } }, { session, new: true, runValidators: true }).lean();
       if (!updatedClient) throw correctionError('El cliente o su punto cambio desde la solicitud. Rechazala y solicita una ubicacion actualizada.', 409);
       approved = await Report.findOneAndUpdate({ _id: id, status: 'pending' }, { $set: {
         status: 'approved', reviewedBy: actor(req.user), reviewedAt: new Date(), reviewNote: note,
@@ -89,7 +105,7 @@ exports.approveRequest = handler(async (req, res) => {
     }
     throw error;
   } finally { await session.endSession(); }
-  res.json({ report: reportView(approved), client: updatedClient, message: 'Direccion aprobada y ubicacion del cliente actualizada.' });
+  res.json({ report: reportView(approved), client: updatedClient, message: 'Cambio aprobado. Ubicacion y sede del cliente actualizadas.' });
 });
 
 exports.rejectRequest = handler(async (req, res) => {

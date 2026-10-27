@@ -21,7 +21,14 @@ function normalizeCorrectionProposal(input) {
     }
     accuracyMeters = Number(input.accuracyMeters);
   }
-  return { details, proposedLocation: { latitude, longitude }, accuracyMeters };
+  const proposal = { details, proposedLocation: { latitude, longitude }, accuracyMeters };
+  if (input.proposedSucursal !== undefined) {
+    if (typeof input.proposedSucursal !== 'string' || input.proposedSucursal.trim().length > 120) {
+      throw correctionError('Nombre de sede invalido (maximo 120 caracteres).');
+    }
+    proposal.proposedSucursal = input.proposedSucursal.trim();
+  }
+  return proposal;
 }
 
 function canReviewCorrection(report) {
