@@ -89,7 +89,8 @@ exports.approveRequest = handler(async (req, res) => {
           throw correctionError('Ya existe una sede con ese nombre para este cliente.', 409);
         }
       }
-      updatedClient = await Client.findOneAndUpdate({ _id: report.targetClientId, id: report.clientId, sucursal: report.sucursal || '',
+      updatedClient = await Client.findOneAndUpdate({ _id: report.targetClientId, id: report.clientId,
+        sucursal: report.sucursal || { $in: ['', null] },
         'location.latitude': report.clientSnapshot.location.latitude, 'location.longitude': report.clientSnapshot.location.longitude },
       { $set: { location: proposal.proposedLocation,
         ...(proposal.proposedSucursal !== undefined ? { sucursal: proposal.proposedSucursal } : {}) } }, { session, new: true, runValidators: true }).lean();

@@ -44,7 +44,7 @@ test('REST: chofer solicita; admin aprueba/rechaza; historial y conflictos', asy
   const matches = (item, query) => Object.entries(query).every(([key, expected]) => {
     const value = key.split('.').reduce((result, part) => result?.[part], item);
     if (expected && typeof expected === 'object' && '$ne' in expected) return value != null;
-    if (expected && typeof expected === 'object' && '$in' in expected) return expected.$in.map(String).includes(String(value));
+    if (expected && typeof expected === 'object' && '$in' in expected) return expected.$in.map(String).includes(String(value ?? null));
     return String(value) === String(expected);
   });
   const methods = [[Client, 'find'], [Client, 'findOneAndUpdate'], [Report, 'find'], [Report, 'findOne'], [Report, 'findById'],
@@ -141,4 +141,16 @@ test('REST: chofer solicita; admin aprueba/rechaza; historial y conflictos', asy
   assert.equal(clients[0].sucursal, 'Centro');
   assert.deepEqual(clients[0].location, renameBody.proposedLocation);
   assert.equal(clients[1].sucursal, 'Sur');
+  for (const legacyBranch of [undefined, null]) {
+    if (legacyBranch === undefined) delete clients[0].sucursal;
+    else clients[0].sucursal = legacyBranch;
+    const legacyRequest = await (await request('/requests', {
+      ...body, sucursal: '', proposedSucursal: 'Centro', proposedLocation: structuredClone(clients[0].location),
+    })).json();
+    assert.ok(legacyRequest.reportId);
+    const response = await request(`/requests/${legacyRequest.reportId}/approve`, {}, 'admin');
+    const result = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(result));
+    assert.equal(clients[0].sucursal, 'Centro');
+  }
 });
