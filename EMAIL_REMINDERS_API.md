@@ -1,5 +1,9 @@
 # API de correos y recordatorios (admin)
 
+El chequeo diario envia el recordatorio matutino a las 08:00 y el reporte de estado
+a las 10:00, hora de `America/Caracas`. La zona se puede cambiar con
+`DAILY_CHECK_TIMEZONE`; el reporte incluye los chequeos registrados durante ese dia local.
+
 Estos endpoints permiten probar envio de correos, WhatsApp y mandar recordatorios.
 
 Requisitos:
