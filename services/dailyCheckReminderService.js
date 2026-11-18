@@ -374,7 +374,6 @@ async function sendMissingDailyCheckReminderEmail(referenceDate = new Date()) {
 
 let reminderScheduler = null;
 let lastMorningTriggerDateKey = null;
-let lastReportTriggerDateKey = null;
 
 function startDailyCheckReminderScheduler() {
   if (reminderScheduler) {
@@ -397,19 +396,9 @@ function startDailyCheckReminderScheduler() {
       }
     }
 
-    if (currentTime.hour === 10 && currentTime.minute === 0 && lastReportTriggerDateKey !== currentDateKey) {
-      lastReportTriggerDateKey = currentDateKey;
-
-      try {
-        const result = await sendMissingDailyCheckReminderEmail();
-        console.log("[dailyCheckReminder] 10:00 daily status report finished:", result);
-      } catch (error) {
-        console.error("[dailyCheckReminder] 10:00 daily status report failed:", error);
-      }
-    }
   }, 60 * 1000);
 
-  console.log(`[dailyCheckReminder] Scheduler started at 08:00 and 10:00 (${DAILY_CHECK_TIMEZONE}).`);
+  console.log(`[dailyCheckReminder] Morning reminder scheduler started at 08:00 (${DAILY_CHECK_TIMEZONE}).`);
 
   return reminderScheduler;
 }

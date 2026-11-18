@@ -4,6 +4,18 @@ El chequeo diario envia el recordatorio matutino a las 08:00 y el reporte de est
 a las 10:00, hora de `America/Caracas`. La zona se puede cambiar con
 `DAILY_CHECK_TIMEZONE`; el reporte incluye los chequeos registrados durante ese dia local.
 
+## Reporte diario en Render
+
+Usa un servicio **Cron Job** separado para el reporte (el temporizador del servidor web no lo envia):
+
+- Runtime: Node.
+- Build command: `npm ci`.
+- Command: `npm run cron:daily-check`.
+- Schedule: `0 14 * * *` (UTC, equivale a las 10:00 de Caracas).
+- Variables: copia las variables de MongoDB y correo del backend y configura `DAILY_CHECK_TIMEZONE=America/Caracas`.
+
+El Cron Job conecta a MongoDB, envia un reporte y termina. El servidor web conserva el recordatorio de las 08:00, pero no envia el reporte de las 10:00 para evitar duplicados.
+
 Estos endpoints permiten probar envio de correos, WhatsApp y mandar recordatorios.
 
 Requisitos:
