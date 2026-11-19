@@ -4,6 +4,7 @@ const TransportTrip = require("../models/transportTrip.model");
 const { normalizeLoadGuide } = require("../services/loadGuideService");
 const { loadDispatchCompanies } = require("../services/dispatchCompany.service");
 const { routeStopIdentity, normalizeRouteStops, normalizeDriverRoute } = require('../services/routeStopIdentity.service');
+const { canAccessDriverRoute } = require('../services/driverRouteAccess.service');
 const DispatchIssueReport = require("../models/dispatchIssueReport.model");
 const {
   buildMissingClients,
@@ -978,6 +979,33 @@ const makeRoute = async (req, res) => {
   } catch (err) {
     console.log("Error al calcular la ruta logística:", err);
     res.status(500).json({ message: "Error calculating route" });
+  }
+};
+
+const authorizeDriverId = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ message: 'Authentication required' });
+  if (!canAccessDriverRoute(req.user, req.params.driverId)) {
+    return res.status(403).json({ message: 'Solo puedes consultar las rutas asignadas a tu usuario.' });
+  }
+  return next();
+};
+
+const authorizeDriverRoute = async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ message: 'Authentication required' });
+  if (String(req.user.role || '').trim().toLowerCase() === 'admin') return next();
+  if (String(req.user.role || '').trim().toLowerCase() !== 'chofer') {
+    return res.status(403).json({ message: 'Solo el chofer asignado puede acceder a esta ruta.' });
+  }
+
+  try {
+    const assignment = await RouteAssignment.findById(req.params.routeId).select('driverId').lean();
+    if (!assignment || !canAccessDriverRoute(req.user, assignment.driverId)) {
+      return res.status(404).json({ message: 'Ruta no encontrada.' });
+    }
+    return next();
+  } catch (error) {
+    console.error('[driver-route-access] Error validating route ownership:', error);
+    return res.status(500).json({ message: 'No se pudo validar el acceso a la ruta.' });
   }
 };
 
@@ -2047,6 +2075,8 @@ const exportRouteAsGpx = async (req, res) => {
 
 module.exports = {
   makeRoute,
+  authorizeDriverId,
+  authorizeDriverRoute,
   getDriverCurrentRoute,
   getDriverRouteById,
   listRouteAssignments,

@@ -1,6 +1,6 @@
 const express = require('express');
 const { register, login, getSession, logout, requestPasswordResetCode, verifyPasswordResetCode, resetPasswordWithCode, listUsersForAdmin, listReporterUsersForAdmin, approveUserByAdmin, updateUserRoleByAdmin, updateUserPasswordByAdmin, authMiddleware, requireAdminRole } = require('../controllers/auth.controllers');
-const { makeRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, addStopToDriverRoute, removeStopFromDriverRoute, reoptimizeDriverRoute, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
+const { makeRoute, authorizeDriverId, authorizeDriverRoute, getDriverCurrentRoute, getDriverRouteById, listRouteAssignments, listRouteDispatchStatuses, getRouteDispatchStatusDetail, getDriverPerformanceAnalytics, updateRouteAssignment, deleteRouteAssignment, updateStopDispatchStatus, addStopToDriverRoute, removeStopFromDriverRoute, reoptimizeDriverRoute, previewDriverRouteCustomization, customizeDriverRoute, resetDriverRoute, updateMissingClientResolution, createDispatchIssueReport, updateDispatchIssueReport, deleteDispatchIssueReport, listDispatchIssueReports, getRouteDispatchIssueSummary, exportRouteAsGpx } = require('../controllers/routing.controllers');
 const { registerClient, countClients, getClient, getClientBranches, deleteClient, createClientLocationReport, listClientLocationReports, deleteClientLocationReport, cleanupDuplicateMainBranches } = require('../controllers/client.controllers');
 const { createDailyCheck, getDailyCheckById, getDailyChecksByPlaca, getRecentDailyChecks, getDailyFuelConsumption, updateDailyCheck, deleteDailyCheck } = require('../controllers/dailyCheck.controllers');
 const {
@@ -143,8 +143,16 @@ router.post('/internal/cron/daily-check-reminder', requireCronKey, async (req, r
       });
     }
 
+    const failedRecipients = result.results?.filter(item => item.status !== 'sent') || [];
+    if (!result.sent || failedRecipients.length) {
+      return res.status(502).json({
+        message: 'No se pudo enviar el reporte diario a todos los administradores.',
+        result,
+      });
+    }
+
     return res.status(200).json({
-      message: result.sent ? 'Reporte diario enviado a administradores.' : 'No hubo choferes pendientes para notificar.',
+      message: 'Reporte diario enviado a administradores.',
       result,
     });
   } catch (error) {
@@ -176,28 +184,28 @@ router.delete('/internal/admin/clientLocationReports/:reportId', requireAdminRol
 router.delete('/internal/admin/deleteClient/:id', requireAdminRole, requireAdminDeleteKey, deleteClient);
  
 // Rutas de logística
-router.post('/makeRoute', makeRoute);
+router.post('/makeRoute', requireAdminRole, makeRoute);
 router.post('/makeRoute/preview', requireAdminRole, (req, res) => { req.previewOnly = true; return makeRoute(req, res); });
 router.patch('/driver-routes/:routeId/guide', requireAdminRole, makeRoute);
-router.get('/driver-routes/:driverId/current', getDriverCurrentRoute);
-router.get('/driver-routes/by-id/:routeId', getDriverRouteById);
-router.get('/driver-routes/:routeId/export-gpx', exportRouteAsGpx);
-router.get('/driver-routes/:routeId/issues-summary', getRouteDispatchIssueSummary);
-router.post('/driver-routes/:routeId/customize/preview', previewDriverRouteCustomization);
-router.patch('/driver-routes/:routeId/customize', customizeDriverRoute);
-router.post('/driver-routes/:routeId/reset', resetDriverRoute);
-router.get('/route-dispatch-status', listRouteDispatchStatuses);
-router.get('/route-dispatch-status/:routeId', getRouteDispatchStatusDetail);
-router.get('/driver-performance-analytics', getDriverPerformanceAnalytics);
+router.get('/driver-routes/:driverId/current', authMiddleware, authorizeDriverId, getDriverCurrentRoute);
+router.get('/driver-routes/by-id/:routeId', authMiddleware, authorizeDriverRoute, getDriverRouteById);
+router.get('/driver-routes/:routeId/export-gpx', authMiddleware, authorizeDriverRoute, exportRouteAsGpx);
+router.get('/driver-routes/:routeId/issues-summary', authMiddleware, authorizeDriverRoute, getRouteDispatchIssueSummary);
+router.post('/driver-routes/:routeId/customize/preview', authMiddleware, authorizeDriverRoute, previewDriverRouteCustomization);
+router.patch('/driver-routes/:routeId/customize', authMiddleware, authorizeDriverRoute, customizeDriverRoute);
+router.post('/driver-routes/:routeId/reset', authMiddleware, authorizeDriverRoute, resetDriverRoute);
+router.get('/route-dispatch-status', requireAdminRole, listRouteDispatchStatuses);
+router.get('/route-dispatch-status/:routeId', authMiddleware, authorizeDriverRoute, getRouteDispatchStatusDetail);
+router.get('/driver-performance-analytics', requireAdminRole, getDriverPerformanceAnalytics);
 router.get('/internal/admin/routes', requireAdminRole, requireAdminDeleteKey, listRouteAssignments);
 router.patch('/internal/admin/routes/:routeId', requireAdminRole, requireAdminDeleteKey, updateRouteAssignment);
 router.delete('/internal/admin/routes/:routeId', requireAdminRole, requireAdminDeleteKey, deleteRouteAssignment);
-router.patch('/driver-routes/:routeId/stops/:clientId/dispatch', updateStopDispatchStatus);
-router.post('/driver-routes/:routeId/stops', addStopToDriverRoute);
-router.delete('/driver-routes/:routeId/stops/:clientId', removeStopFromDriverRoute);
-router.post('/driver-routes/:routeId/reoptimize', reoptimizeDriverRoute);
-router.patch('/driver-routes/:routeId/missing/:clientId/resolve', updateMissingClientResolution);
-router.post('/driver-routes/:routeId/stops/:clientId/issues', createDispatchIssueReport);
+router.patch('/driver-routes/:routeId/stops/:clientId/dispatch', authMiddleware, authorizeDriverRoute, updateStopDispatchStatus);
+router.post('/driver-routes/:routeId/stops', authMiddleware, authorizeDriverRoute, addStopToDriverRoute);
+router.delete('/driver-routes/:routeId/stops/:clientId', authMiddleware, authorizeDriverRoute, removeStopFromDriverRoute);
+router.post('/driver-routes/:routeId/reoptimize', authMiddleware, authorizeDriverRoute, reoptimizeDriverRoute);
+router.patch('/driver-routes/:routeId/missing/:clientId/resolve', authMiddleware, authorizeDriverRoute, updateMissingClientResolution);
+router.post('/driver-routes/:routeId/stops/:clientId/issues', authMiddleware, authorizeDriverRoute, createDispatchIssueReport);
 router.post('/internal/admin/driver-routes/:routeId/stops/:clientId/issues', requireAdminRole, requireAdminDeleteKey, createDispatchIssueReport);
 router.get('/internal/admin/dispatchIssueReports', requireAdminRole, requireAdminDeleteKey, listDispatchIssueReports);
 router.patch('/internal/admin/dispatchIssueReports/:reportId', requireAdminRole, requireAdminDeleteKey, updateDispatchIssueReport);
