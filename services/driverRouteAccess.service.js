@@ -10,7 +10,7 @@ function canAccessDriverRoute(user, assignedDriverId) {
   const assignedIdentity = normalizeDriverIdentity(assignedDriverId);
   if (!assignedIdentity) return false;
 
-  return [user?.username, user?.email]
+  return [user?.driverId, user?.username, user?.email]
     .map(normalizeDriverIdentity)
     .some((identity) => identity && identity === assignedIdentity);
 }

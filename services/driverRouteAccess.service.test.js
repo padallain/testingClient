@@ -8,6 +8,7 @@ test("Solo el chofer asignado o un administrador puede acceder a la ruta", () =>
   assert.equal(canAccessDriverRoute(driver, "09726276"), true);
   assert.equal(canAccessDriverRoute(driver, "DRIVER@example.com"), true);
   assert.equal(canAccessDriverRoute(driver, "12345678"), false);
+  assert.equal(canAccessDriverRoute({ role: "chofer", username: "pad_chofer", driverId: "27558739" }, "27558739"), true);
   assert.equal(canAccessDriverRoute({ ...driver, role: "user" }, "09726276"), false);
   assert.equal(canAccessDriverRoute(null, "09726276"), false);
   assert.equal(canAccessDriverRoute({ role: "admin" }, "12345678"), true);

@@ -72,6 +72,7 @@ const isAdminUser = (user) => normalizeRole(user?.role) === ADMIN_ROLE;
 const buildSessionUser = (user) => ({
   id: user._id,
   username: user.username,
+  driverId: String(user.driverId || "").trim(),
   email: user.email,
   role: normalizeRole(user.role),
   approvalRequired: requiresApproval(user),
