@@ -799,17 +799,27 @@ const makeRoute = async (req, res) => {
         resolvedAt: null,
       }));
     const notFoundIds = notFoundClients.map((c) => c.clientId);
-    if (loadGuide && notFoundIds.length) {
-      return res.status(400).json({ message: "Los siguientes clientes o sedes no existen en la base de datos y no pueden agregarse a la ruta.", notFoundIds });
-    }
+
+    // Los clientes inexistentes no se agregan al recorrido ni a la guia.
+    const foundUniqueStops = uniqueStops.filter((stop) => {
+      const key = stop.sucursal ? `${stop.clientId}|${stop.sucursal}` : stop.clientId;
+      return foundStopKeys.has(key);
+    });
+    uniqueStops.length = 0;
+    uniqueStops.push(...foundUniqueStops);
+
     if (loadGuide) {
       const enrichOrder = order => {
         const client = clients.find((current) => String(current.id) === order.clientId
           && (!order.sucursal || String(current.sucursal || '') === order.sucursal));
+        if (!client) return null;
         return { ...order, clientName: client.sucursal ? `${client.nombre} - ${client.sucursal}` : client.nombre };
       };
-      loadGuide.orders = loadGuide.orders.map(enrichOrder);
-      loadGuide.subGuides = loadGuide.subGuides.map(guide => ({ ...guide, orders: guide.orders.map(enrichOrder) }));
+      loadGuide.orders = loadGuide.orders.map(enrichOrder).filter(Boolean);
+      loadGuide.subGuides = loadGuide.subGuides
+        .map(guide => ({ ...guide, orders: guide.orders.map(enrichOrder).filter(Boolean) }))
+        .filter(guide => guide.orders.length);
+      loadGuide.totalAmount = loadGuide.orders.reduce((sum, order) => sum + Math.round(order.total * 100), 0) / 100;
     }
     const uniqueIds = uniqueStops.map((stop) => stop.clientId);
     const explicitRouteOrder = preserveRouteOrder
@@ -1721,6 +1731,8 @@ const previewDriverRouteCustomization = async (req, res) => {
         return res.status(400).json({ message: `Stop ${clientId || "unknown"} is not part of the assigned route` });
       }
 
+
+
       nextStops.push(currentStopsById.get(key));
       currentStopsById.delete(key);
     }
@@ -1729,7 +1741,9 @@ const previewDriverRouteCustomization = async (req, res) => {
       return res.status(400).json({ message: "The customized route must include all assigned stops" });
     }
 
-    const priorityStops = await orderStopsFromPriority(nextStops, req.body.priorityStop, req.body.recalculatePriority === true);
+    const priorityStops = req.body.recalculatePriority === true
+      ? await orderStopsFromPriority(nextStops, req.body.priorityStop, true)
+      : nextStops;
     const normalizedStops = mapStopsForArtifacts(priorityStops);
     const { googleMapsRouteLinks, openRouteLink } = buildRouteArtifacts(normalizedStops);
     const totalDistanceKm = await calculateRouteDistance(normalizedStops);

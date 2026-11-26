@@ -612,10 +612,12 @@ const buildRouteOption = (routeMeta, route, distanceMatrix, lockedPrefixLength =
     ? route
     : optimizeClosedRouteWithTwoOptAndOrOpt(route, distanceMatrix, lockedPrefixLength);
 
+  const zoneOrderedRoute = moveZoneOutliersToEnd(optimizedRoute, lockedPrefixLength);
+
   return {
     ...routeMeta,
-    route: stripMatrixIndex(optimizedRoute),
-    estimatedDistanceKm: toRoundedDistance(calculateClosedRouteDistanceFromMatrix(optimizedRoute, distanceMatrix)),
+    route: stripMatrixIndex(zoneOrderedRoute),
+    estimatedDistanceKm: toRoundedDistance(calculateClosedRouteDistanceFromMatrix(zoneOrderedRoute, distanceMatrix)),
   };
 };
 
@@ -634,6 +636,30 @@ const buildMirroredIndexedRoute = (optimizedRoute, lockedPrefixLength) => {
   return [...optimizedRoute].reverse();
 };
 
+const moveZoneOutliersToEnd = (route, lockedPrefixLength = 0) => {
+  if (!Array.isArray(route) || route.length < 2) return route;
+
+  const prefix = route.slice(0, Math.max(0, lockedPrefixLength));
+  const remaining = route.slice(prefix.length);
+  if (remaining.length < 2) return route;
+
+  const cabimasCount = remaining.filter((client) => isLocationWithinBounds(client?.location, CABIMAS_BOUNDS)).length;
+  const ojedaCount = remaining.filter((client) => isLocationWithinBounds(client?.location, OJEDA_BOUNDS)).length;
+  const primaryBounds = cabimasCount >= ojedaCount && cabimasCount > 0
+    ? CABIMAS_BOUNDS
+    : ojedaCount > cabimasCount && ojedaCount > 0
+      ? OJEDA_BOUNDS
+      : null;
+
+  if (!primaryBounds) return route;
+
+  const localStops = remaining.filter((client) => isLocationWithinBounds(client?.location, primaryBounds));
+  const outliers = remaining.filter((client) => !isLocationWithinBounds(client?.location, primaryBounds));
+
+  if (outliers.length === 0) return route;
+  return [...prefix, ...localStops, ...outliers];
+};
+
 const buildRouteOptions = async (clients, options = {}) => {
   const { startClient, indexedClients, distanceMatrix } = await buildRouteContext(clients, options);
 
@@ -645,7 +671,10 @@ const buildRouteOptions = async (clients, options = {}) => {
 
   const closestGreedy = buildGreedyRoute(indexedClients, distanceMatrix, false, lockedPrefixLength);
   const closestOptimized = optimizeClosedRouteWithTwoOptAndOrOpt(closestGreedy, distanceMatrix, lockedPrefixLength);
-  const mirroredIndexed = buildMirroredIndexedRoute(closestOptimized, lockedPrefixLength);
+  const mirroredIndexed = moveZoneOutliersToEnd(
+    buildMirroredIndexedRoute(closestOptimized, lockedPrefixLength),
+    lockedPrefixLength,
+  );
 
   const optionBuilders = [
     buildRouteOption(
