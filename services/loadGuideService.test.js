@@ -308,3 +308,12 @@ test('Optimizador real: la prioridad fija una sede y conserva todas las paradas'
     assert.equal(new Set(option.route.map(stop => `${stop.id}|${stop.sucursal || ''}`)).size, 4);
   }
 });
+
+test('La guia puede contener menos pedidos que las paradas de la ruta', () => {
+  const result = normalizeLoadGuide({ orders: [order] }, [
+    { clientId: 'CLIENTE' },
+    { clientId: 'PENDIENTE-ANTERIOR' },
+  ], options);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].clientId, 'CLIENTE');
+});

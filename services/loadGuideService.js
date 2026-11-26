@@ -64,11 +64,6 @@ function normalizeLoadGuide(input, stops, { companies = [], defaultCompanyId = '
     guide?.orders.push(normalizedOrder);
     return normalizedOrder;
   });
-  for (const stop of stops) {
-    if (!orders.some((order) => stopKey(order) === stopKey(stop))) {
-      fail(`Falta un pedido para el cliente ${stop.clientId}${stop.sucursal ? ` (${stop.sucursal})` : ''}.`);
-    }
-  }
   const subGuides = [...guideByCompany.values()].map(guide => ({
     ...guide,
     companyName: registeredCompanies.get(guide.companyId)?.name || '',
@@ -84,5 +79,9 @@ function normalizeLoadGuide(input, stops, { companies = [], defaultCompanyId = '
     totalAmount: orders.reduce((sum, order) => sum + Math.round(order.total * 100), 0) / 100,
   };
 }
+
+// La guia puede ser un subconjunto de la ruta. Las paradas adicionales,
+// como clientes pendientes de una ruta anterior, no necesitan tener pedido
+// ni aparecer dentro de loadGuide.
 
 module.exports = { normalizeLoadGuide };

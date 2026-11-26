@@ -800,7 +800,7 @@ const makeRoute = async (req, res) => {
       }));
     const notFoundIds = notFoundClients.map((c) => c.clientId);
     if (loadGuide && notFoundIds.length) {
-      return res.status(400).json({ message: "Todos los clientes de la guia deben existir en la ruta.", notFoundIds });
+      return res.status(400).json({ message: "Los siguientes clientes o sedes no existen en la base de datos y no pueden agregarse a la ruta.", notFoundIds });
     }
     if (loadGuide) {
       const enrichOrder = order => {
